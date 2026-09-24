@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartTraffic - OS-Driven Traffic Simulation Platform</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <!-- Project Stylesheet -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-section">
+        <img src="graphicera_logo.png" alt="GEU Logo" class="geu-logo" onerror="this.style.display='none'">
+        <div class="brand-titles">
+          <h1>SmartTraffic: OS-Driven Traffic Management & Simulation</h1>
+          <p>Graphic Era (Deemed to be University), Dehradun &bull; Academic Session 2026–27</p>
+        </div>
+      </div>
+      <div class="academic-info">
+        <div>Team ID: <span class="badge-tag">OSDBMS-V-2026-T217</span></div>
+        <div>Lead: <span class="badge-tag">Kshitij Kukreti</span></div>
+        <div>Mentor: <span class="badge-tag">Dr. Hradesh Kumar</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- KPI Summary Row -->
+    <section class="kpi-grid">
+      <div class="kpi-card highlight">
+        <div class="kpi-label">Total Vehicles</div>
+        <div class="kpi-value" id="kpi-total-vehicles">0</div>
+        <div class="kpi-unit">Registered entities</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Waiting in Queue</div>
+        <div class="kpi-value" id="kpi-waiting-vehicles">0</div>
+        <div class="kpi-unit">Awaiting green phase</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active / Crossing</div>
+        <div class="kpi-value" id="kpi-active-vehicles">0</div>
+        <div class="kpi-unit">Inside critical section</div>
+      </div>
+      <div class="kpi-card emergency-card">
+        <div class="kpi-label">Emergency Active</div>
+        <div class="kpi-value" id="kpi-emergency-vehicles" style="color: var(--signal-red);">0</div>
+        <div class="kpi-unit">Priority 1 override</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg Waiting Time</div>
+        <div class="kpi-value" id="kpi-avg-wait">0.00</div>
+        <div class="kpi-unit">Seconds per vehicle</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg Turnaround</div>
+        <div class="kpi-value" id="kpi-avg-tat">0.00</div>
+        <div class="kpi-unit">Seconds to departure</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Throughput</div>
+        <div class="kpi-value" id="kpi-throughput">0.000</div>
+        <div class="kpi-unit">Vehicles / second</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Sim Time</div>
+        <div class="kpi-value" id="kpi-sim-tick">0</div>
+        <div class="kpi-unit">Simulation ticks</div>
+      </div>
+    </section>
+
+    <!-- Simulation Control & Scenario Bar -->
+    <section class="control-bar">
+      <div class="control-group">
+        <label for="select-algorithm">Scheduling Algorithm</label>
+        <select id="select-algorithm">
+          <option value="ADAPTIVE" selected>Adaptive (OS Dynamic Scoring)</option>
+          <option value="PRIORITY">Priority (with Aging Invariant)</option>
+          <option value="ROUND_ROBIN">Round Robin (Preemptive)</option>
+          <option value="FCFS">First-Come First-Served (FCFS)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="input-quantum">RR Quantum (sec)</label>
+        <input type="number" id="input-quantum" min="1" max="20" value="2">
+      </div>
+
+      <div class="control-group">
+        <label for="select-scenario">Simulation Scenario</label>
+        <select id="select-scenario">
+          <option value="NORMAL" selected>Normal Urban Traffic</option>
+          <option value="HEAVY">Heavy Congestion (Peak Hour)</option>
+          <option value="EMERGENCY">Emergency Corridor Priority</option>
+          <option value="ACCIDENT">Road Accident & Capacity Drop</option>
+          <option value="ROAD_CLOSURE">Construction / Road Closure</option>
+          <option value="BUS_PRIORITY">Bus & Transit Priority</option>
+          <option value="MIXED">Mixed Vehicle Inflow</option>
+        </select>
+      </div>
+
+      <div class="action-buttons">
+        <button class="btn btn-primary" id="btn-start-sim">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run Engine
+        </button>
+        <button class="btn btn-warning" id="btn-pause-sim">Pause</button>
+        <button class="btn btn-success" id="btn-resume-sim">Resume</button>
+        <button class="btn btn-danger" id="btn-reset-sim">Reset</button>
+        <button class="btn btn-outline" id="btn-run-benchmark">Benchmark All</button>
+      </div>
+    </section>
+
+    <!-- Main Grid: Map & Junction Monitor -->
+    <div class="main-grid">
+      <!-- Left Column: Map & Queue -->
+      <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- GIS Map Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Dehradun Metropolitan Traffic Grid</h2>
+            <span class="badge badge-running" id="sim-status-badge">ACTIVE</span>
+          </div>
+          <div class="card-body" style="padding: 0;">
+            <div id="leaflet-map"></div>
+          </div>
+        </div>
+
+        <!-- Vehicle Queue Table Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Vehicle Process Queue (OS Simulation)</h2>
+            <button class="btn btn-primary" id="btn-open-add-vehicle" style="padding: 4px 10px; font-size: 0.8rem;">
+              + Add Vehicle
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>Plate</th>
+                  <th>Type</th>
+                  <th>Junction</th>
+                  <th>Dir</th>
+                  <th>Arrival</th>
+                  <th>Priority</th>
+                  <th>State</th>
+                  <th>Wait Time</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="vehicles-table-body">
+                <tr><td colspan="10" style="text-align: center;">Loading vehicles...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Junction Signal Controllers & Incidents -->
+      <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- Junctions & Signals -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Interconnected Junction Signal Monitors</h2>
+            <span style="font-size: 0.78rem; color: var(--text-muted);">Click light to toggle Manual Green</span>
+          </div>
+          <div class="card-body">
+            <div class="junction-grid" id="junctions-container">
+              <!-- Rendered via simulation.js -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Incident Management Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Traffic Incidents & Bottlenecks</h2>
+            <button class="btn btn-danger" id="btn-open-add-incident" style="padding: 4px 10px; font-size: 0.8rem;">
+              + Report Incident
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Severity</th>
+                  <th>Location</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="incidents-table-body">
+                <tr><td colspan="6" style="text-align: center;">Loading incidents...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Recent Scheduling Events Log -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Live Scheduling Events Audit Log</h2>
+          </div>
+          <div class="card-body" id="events-stream" style="max-height: 180px; overflow-y: auto;">
+            <!-- Rendered via simulation.js -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Comparative Analytics Section -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Comparative Scheduling Algorithm Analytics</h2>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">Real-time C OS Engine Benchmarks on Identical Workload</span>
+      </div>
+      <div class="card-body">
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          <div class="chart-container">
+            <canvas id="chart-waiting-time"></canvas>
+          </div>
+          <div class="chart-container">
+            <canvas id="chart-throughput"></canvas>
+          </div>
+        </div>
+
+        <!-- Comparative Table -->
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Algorithm</th>
+                <th>Avg Waiting Time</th>
+                <th>Avg Turnaround Time</th>
+                <th>Throughput</th>
+                <th>Total Completion Time</th>
+                <th>Emergency Wait</th>
+                <th>Execution Order</th>
+              </tr>
+            </thead>
+            <tbody id="benchmark-table-body">
+              <tr><td colspan="7" style="text-align: center;">Click "Benchmark All" to compute cross-algorithm comparison.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- OS Synchronization & Concurrency Inspector Section -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Operating System Synchronization & Mutual Exclusion Inspector</h2>
+        <button class="btn btn-primary" id="btn-run-sync-test" style="font-size: 0.8rem;">
+          Run OS Mutex & Semaphore Verification
+        </button>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+          <b>Demonstrated OS Invariants:</b> The intersection is modeled as a <b>Shared Critical Resource</b>.
+          Orthogonal vehicle streams (N/S vs E/W) acquire a <b>Mutex</b> to guarantee zero physical collisions.
+          Lane physical throughput is throttled using a <b>Counting Semaphore</b> to prevent race conditions and queue starvation.
+        </p>
+        <div class="sync-terminal" id="sync-terminal-output">
+          &gt; OS Concurrency Inspector idle. Click "Run OS Mutex & Semaphore Verification" to invoke compiled C engine threads.
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Add Vehicle Modal -->
+  <div class="modal-overlay" id="modal-add-vehicle">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Inject Vehicle into Queue</h3>
+        <button class="modal-close" id="btn-close-add-vehicle">&times;</button>
+      </div>
+      <form id="form-add-vehicle">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="veh-plate">License Plate Number</label>
+            <input type="text" id="veh-plate" placeholder="e.g. UK07-AB-5555" required>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="veh-type">Vehicle Type</label>
+              <select id="veh-type">
+                <option value="Car">Car</option>
+                <option value="Bus">Bus</option>
+                <option value="Truck">Truck</option>
+                <option value="Motorcycle">Motorcycle</option>
+                <option value="Ambulance">Ambulance (Emergency)</option>
+                <option value="Fire Truck">Fire Truck (Emergency)</option>
+                <option value="Police">Police Cruiser (Emergency)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="veh-junction">Target Junction</label>
+              <select id="veh-junction">
+                <option value="1">Junction 1: Ghanta Ghar</option>
+                <option value="2">Junction 2: Ballupur Chowk</option>
+                <option value="3">Junction 3: ISBT Dehradun</option>
+                <option value="4">Junction 4: Prince Chowk</option>
+              </select>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="veh-direction">Approach Direction</label>
+              <select id="veh-direction">
+                <option value="NORTH">NORTH</option>
+                <option value="SOUTH">SOUTH</option>
+                <option value="EAST">EAST</option>
+                <option value="WEST">WEST</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="veh-arrival">Arrival Time (s)</label>
+              <input type="number" id="veh-arrival" min="0" value="0">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="veh-burst">Burst / Service Time (s)</label>
+              <input type="number" id="veh-burst" min="1" max="30" value="3">
+            </div>
+            <div class="form-group">
+              <label for="veh-priority">Initial Priority (1=Highest)</label>
+              <input type="number" id="veh-priority" min="1" max="10" value="3">
+            </div>
+          </div>
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 4px;">
+            <input type="checkbox" id="veh-emergency" style="width: auto;">
+            <label for="veh-emergency" style="cursor: pointer; color: var(--signal-red);">Mark as Emergency Vehicle (Force Priority 1)</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Create Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Report Incident Modal -->
+  <div class="modal-overlay" id="modal-add-incident">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Report Road Traffic Incident</h3>
+        <button class="modal-close" id="btn-close-add-incident">&times;</button>
+      </div>
+      <form id="form-add-incident">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="inc-type">Incident Type</label>
+            <select id="inc-type">
+              <option value="ACCIDENT">Road Accident</option>
+              <option value="ROAD_CLOSURE">Road Closure / Construction</option>
+              <option value="CONGESTION">Heavy Gridlock Congestion</option>
+              <option value="EMERGENCY_CORRIDOR">VIP / Emergency Escort Corridor</option>
+            </select>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="inc-severity">Severity</label>
+              <select id="inc-severity">
+                <option value="LOW">LOW</option>
+                <option value="MEDIUM" selected>MEDIUM</option>
+                <option value="HIGH">HIGH</option>
+                <option value="CRITICAL">CRITICAL</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="inc-junction">Affected Junction</label>
+              <select id="inc-junction">
+                <option value="1">Junction 1: Ghanta Ghar</option>
+                <option value="2">Junction 2: Ballupur Chowk</option>
+                <option value="3">Junction 3: ISBT Dehradun</option>
+                <option value="4">Junction 4: Prince Chowk</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inc-desc">Incident Description</label>
+            <input type="text" id="inc-desc" placeholder="Details of blockage or accident..." required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-danger">Submit Incident Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Application Modules -->
+  <script src="js/api.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
