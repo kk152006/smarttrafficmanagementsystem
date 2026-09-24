@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.exe
+*.o
+*.a
+*.so
+c_engine/bin/*.exe
+.vscode/
+.idea/
+*.log
+scratch/
+legacy/a.exe
+legacy/scheduler1.exe
