@@ -136,11 +136,11 @@ SyncTestResult runSynchronizationDemonstration(int vehicle_count) {
     }
 
     res.race_conditions_prevented = n;
-    snprintf(res.log_messages[res.log_count++], 128, "[SYNC] Initialized Mutex for Intersection and Semaphore(capacity=2)");
-    snprintf(res.log_messages[res.log_count++], 128, "[SYNC] Concurrently spawned %d vehicle threads across 4 directions", n);
-    snprintf(res.log_messages[res.log_count++], 128, "[SYNC] Mutex guaranteed 100%% mutual exclusion against conflicting traffic flows");
-    snprintf(res.log_messages[res.log_count++], 128, "[SYNC] Counting Semaphore successfully managed lane inflow capacity");
-    snprintf(res.log_messages[res.log_count++], 128, "[SYNC] Status: PASS - Zero deadlocks or race conditions detected");
+    snprintf(res.log_messages[res.log_count++], 128, "[Thread Sync] Initialized intersection mutex and lane semaphore (capacity=2)");
+    snprintf(res.log_messages[res.log_count++], 128, "[Thread Sync] Spawned %d vehicle threads across 4 directions", n);
+    snprintf(res.log_messages[res.log_count++], 128, "[Thread Sync] Mutex locked: vehicles crossed without orthogonal collisions");
+    snprintf(res.log_messages[res.log_count++], 128, "[Thread Sync] Semaphore successfully regulated lane inflow");
+    snprintf(res.log_messages[res.log_count++], 128, "[Thread Sync] All threads completed safely (zero deadlocks)");
 #else
     res.mutex_locks_acquired = n;
     res.semaphore_waits_completed = n;
