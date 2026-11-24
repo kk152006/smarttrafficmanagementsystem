@@ -49,6 +49,10 @@ def create_app():
     def serve_index():
         return send_from_directory(frontend_dir, 'index.html')
 
+    @app.route('/simulation')
+    def serve_simulation():
+        return send_from_directory(frontend_dir, 'simulation.html')
+
     @app.route('/<path:path>')
     def serve_static(path):
         if os.path.exists(os.path.join(frontend_dir, path)):
@@ -71,9 +75,23 @@ def create_app():
     return app
 
 if __name__ == '__main__':
+    import threading
+    try:
+        from simulation_server import create_simulation_app
+        sim_app = create_simulation_app()
+        t = threading.Thread(
+            target=lambda: sim_app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False),
+            daemon=True
+        )
+        t.start()
+    except Exception as e:
+        print(f"[WARN] Port 5001 Simulation server not started: {e}")
+
     app = create_app()
     print(f"============================================================")
-    print(f"SmartTraffic Server starting on port {Config.PORT}")
-    print(f"Web Dashboard: http://localhost:{Config.PORT}")
+    print(f"🚦 SmartTraffic System Active")
+    print(f"👉 Main Dashboard:      http://localhost:{Config.PORT}")
+    print(f"👉 2D Simulation (5001): http://localhost:5001")
+    print(f"👉 2D Simulation (5000): http://localhost:{Config.PORT}/simulation")
     print(f"============================================================")
     app.run(host='0.0.0.0', port=Config.PORT, debug=Config.DEBUG)

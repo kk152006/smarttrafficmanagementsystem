@@ -11,6 +11,12 @@ USE smarttraffic;
 -- Disable foreign key checks during creation
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP VIEW IF EXISTS vw_simulation_summary;
+DROP VIEW IF EXISTS vw_road_traffic_density;
+DROP VIEW IF EXISTS vw_emergency_vehicle_audit;
+DROP VIEW IF EXISTS vw_algorithm_comparison;
+DROP VIEW IF EXISTS vw_junction_live_status;
+
 DROP TABLE IF EXISTS performance_metrics;
 DROP TABLE IF EXISTS scheduling_results;
 DROP TABLE IF EXISTS traffic_incidents;
@@ -229,3 +235,99 @@ CREATE TABLE performance_metrics (
     FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
     INDEX idx_metric_lookup (simulation_id, algorithm, metric_name)
 ) ENGINE=InnoDB;
+
+-- ============================================================================
+-- ANALYTICAL VIEWS (VIRTUAL TABLES)
+-- ============================================================================
+
+-- 1. Real-Time Junction Operational Status View
+CREATE OR REPLACE VIEW vw_junction_live_status AS
+SELECT 
+    j.id AS junction_id,
+    j.name AS junction_name,
+    j.capacity,
+    j.active_direction,
+    j.current_phase,
+    j.status AS junction_status,
+    COUNT(v.id) AS total_vehicles,
+    COALESCE(SUM(CASE WHEN v.status = 'WAITING' THEN 1 ELSE 0 END), 0) AS waiting_vehicles,
+    COALESCE(SUM(CASE WHEN v.status = 'RUNNING' THEN 1 ELSE 0 END), 0) AS running_vehicles,
+    COALESCE(SUM(CASE WHEN v.is_emergency = 1 AND v.status != 'COMPLETED' THEN 1 ELSE 0 END), 0) AS emergency_vehicles_pending
+FROM junctions j
+LEFT JOIN vehicles v ON j.id = v.junction_id
+GROUP BY j.id, j.name, j.capacity, j.active_direction, j.current_phase, j.status;
+
+-- 2. Algorithm Performance Comparison Benchmark View
+CREATE OR REPLACE VIEW vw_algorithm_comparison AS
+SELECT 
+    algorithm,
+    COUNT(*) AS total_runs,
+    ROUND(AVG(avg_waiting_time), 2) AS overall_avg_wait_time,
+    ROUND(AVG(avg_turnaround_time), 2) AS overall_avg_tat,
+    ROUND(AVG(throughput), 3) AS overall_avg_throughput,
+    SUM(total_vehicles) AS total_simulated_vehicles,
+    SUM(completed_vehicles) AS total_completed_vehicles
+FROM simulations
+GROUP BY algorithm;
+
+-- 3. Priority & Emergency Vehicle Transit Audit View
+CREATE OR REPLACE VIEW vw_emergency_vehicle_audit AS
+SELECT 
+    v.id AS vehicle_id,
+    v.simulation_id,
+    s.name AS simulation_name,
+    s.algorithm,
+    v.plate_number,
+    v.vehicle_type,
+    j.name AS junction_name,
+    v.direction,
+    v.arrival_time,
+    v.burst_time,
+    v.priority,
+    v.is_emergency,
+    v.status,
+    v.waiting_time,
+    v.turnaround_time,
+    v.completion_time
+FROM vehicles v
+JOIN simulations s ON v.simulation_id = s.id
+JOIN junctions j ON v.junction_id = j.id
+WHERE v.is_emergency = 1;
+
+-- 4. Road Traffic Density & Road Closure Monitoring View
+CREATE OR REPLACE VIEW vw_road_traffic_density AS
+SELECT 
+    r.id AS road_id,
+    r.name AS road_name,
+    j1.name AS source_junction,
+    j2.name AS dest_junction,
+    r.direction,
+    r.lanes,
+    r.speed_limit,
+    r.length_meters,
+    r.is_closed,
+    COUNT(DISTINCT ti.id) AS active_incidents
+FROM roads r
+JOIN junctions j1 ON r.source_junction_id = j1.id
+JOIN junctions j2 ON r.dest_junction_id = j2.id
+LEFT JOIN traffic_incidents ti ON (ti.road_id = r.id AND ti.is_active = 1)
+GROUP BY r.id, r.name, j1.name, j2.name, r.direction, r.lanes, r.speed_limit, r.length_meters, r.is_closed;
+
+-- 5. Simulation Session Summary View
+CREATE OR REPLACE VIEW vw_simulation_summary AS
+SELECT 
+    s.id AS simulation_id,
+    s.name AS simulation_name,
+    s.algorithm,
+    s.scenario,
+    s.status,
+    s.total_vehicles,
+    s.completed_vehicles,
+    s.avg_waiting_time,
+    s.avg_turnaround_time,
+    s.throughput,
+    COUNT(DISTINCT sr.id) AS has_c_engine_results,
+    s.created_at
+FROM simulations s
+LEFT JOIN scheduling_results sr ON s.id = sr.simulation_id
+GROUP BY s.id, s.name, s.algorithm, s.scenario, s.status, s.total_vehicles, s.completed_vehicles, s.avg_waiting_time, s.avg_turnaround_time, s.throughput, s.created_at;

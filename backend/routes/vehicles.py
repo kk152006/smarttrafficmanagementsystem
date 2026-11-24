@@ -26,12 +26,75 @@ def get_vehicles():
     vehicles = query_all(sql, params)
     return jsonify({"status": "SUCCESS", "count": len(vehicles), "data": vehicles})
 
+@vehicles_bp.route('/batch', methods=['POST'])
+def create_vehicles_batch():
+    payload = request.get_json() or {}
+    vehicles_list = payload.get('vehicles', [])
+    sim_id = payload.get('simulation_id', 1)
+    if not isinstance(vehicles_list, list) or len(vehicles_list) == 0:
+        return jsonify({"status": "ERROR", "message": "vehicles list cannot be empty"}), 400
+
+    import random
+    created_ids = []
+    for data in vehicles_list:
+        v_sim_id = data.get('simulation_id', sim_id)
+        v_type = data.get('vehicle_type', 'Car')
+        plate = data.get('plate_number', '').strip()
+        if not plate:
+            plate = f"UK07-{v_type[:2].upper()}-{random.randint(1000, 9999)}"
+        j_id = data.get('junction_id', 1)
+        direction = data.get('direction', 'NORTH').upper()
+        if direction not in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+            direction = random.choice(['NORTH', 'SOUTH', 'EAST', 'WEST'])
+        arrival_time = int(data.get('arrival_time', 0))
+        burst_time = max(1, int(data.get('burst_time', 2)))
+        priority = max(1, int(data.get('priority', 3)))
+        is_emergency = 1 if data.get('is_emergency') else 0
+        if is_emergency:
+            priority = 1
+        source = data.get('source', 'Origin')
+        destination = data.get('destination', 'Destination')
+
+        new_id = execute_commit(
+            """INSERT INTO vehicles
+               (simulation_id, plate_number, vehicle_type, junction_id, source, destination,
+                direction, arrival_time, burst_time, remaining_time, initial_priority, priority,
+                is_emergency, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'WAITING')""",
+            (v_sim_id, plate, v_type, j_id, source, destination, direction,
+             arrival_time, burst_time, burst_time, priority, priority, is_emergency)
+        )
+        created_ids.append(new_id)
+
+    execute_commit(
+        "UPDATE simulations SET total_vehicles = (SELECT COUNT(*) FROM vehicles WHERE simulation_id = %s) WHERE id = %s",
+        (sim_id, sim_id)
+    )
+
+    return jsonify({"status": "SUCCESS", "count": len(created_ids), "ids": created_ids}), 201
+
+@vehicles_bp.route('/clear', methods=['POST', 'DELETE'])
+def clear_vehicles():
+    sim_id = request.args.get('simulation_id', 1)
+    status_filter = request.args.get('status')
+    if status_filter:
+        execute_commit("DELETE FROM vehicles WHERE simulation_id = %s AND status = %s", (sim_id, status_filter))
+    else:
+        execute_commit("DELETE FROM vehicles WHERE simulation_id = %s", (sim_id,))
+
+    execute_commit(
+        "UPDATE simulations SET total_vehicles = (SELECT COUNT(*) FROM vehicles WHERE simulation_id = %s) WHERE id = %s",
+        (sim_id, sim_id)
+    )
+    return jsonify({"status": "SUCCESS", "message": f"Vehicles cleared for simulation {sim_id}"})
+
 @vehicles_bp.route('/<int:v_id>', methods=['GET'])
 def get_vehicle(v_id):
     vehicle = query_one("SELECT * FROM vehicles WHERE id = %s", (v_id,))
     if not vehicle:
         return jsonify({"status": "ERROR", "message": f"Vehicle {v_id} not found"}), 404
     return jsonify({"status": "SUCCESS", "data": vehicle})
+
 
 @vehicles_bp.route('', methods=['POST'])
 def create_vehicle():

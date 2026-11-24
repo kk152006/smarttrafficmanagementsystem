@@ -51,9 +51,26 @@ const Api = {
       body: JSON.stringify(vehicleData),
     });
   },
+  createVehiclesBatch(data) {
+    return this.request('/vehicles/batch', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updateVehicle(id, data) {
+    return this.request(`/vehicles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
   deleteVehicle(id) {
     return this.request(`/vehicles/${id}`, { method: 'DELETE' });
   },
+  clearVehicles(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/vehicles/clear${query ? '?' + query : ''}`, { method: 'POST' });
+  },
+
 
   // Simulations
   getSimulations() {

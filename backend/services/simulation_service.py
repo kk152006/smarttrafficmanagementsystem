@@ -36,58 +36,63 @@ class SimulationService:
 
     @classmethod
     def seed_scenario_vehicles(cls, sim_id, scenario='NORMAL'):
+        # Clear stale records for this simulation before seeding fresh scenario
+        execute_commit("DELETE FROM vehicle_events WHERE simulation_id = %s", (sim_id,))
+        execute_commit("DELETE FROM vehicles WHERE simulation_id = %s", (sim_id,))
+
         vehicles = []
         if scenario == 'EMERGENCY':
             vehicles = [
-                ('UK07-EM-911', 'Ambulance', 1, 'Doon Hospital', 'Max Hospital', 'NORTH', 0, 2, 1, 1),
-                ('UK07-FT-101', 'Fire Truck', 1, 'Fire Station', 'Premnagar', 'EAST', 1, 3, 1, 1),
-                ('UK07-PV-100', 'Police', 2, 'City Police', 'ISBT', 'SOUTH', 0, 2, 1, 1),
-                ('UK07-CR-112', 'Car', 1, 'Paltan Bazaar', 'Rajpur Road', 'NORTH', 0, 3, 3, 0),
-                ('UK07-CR-113', 'Car', 2, 'Ballupur', 'GMS Road', 'WEST', 2, 3, 4, 0),
+                ('UK07-EM-911', 'Ambulance', 1, 'Doon Hospital', 'Max Hospital', 'NORTH', 0, 1, 1, 1),
+                ('UK07-FT-101', 'Fire Truck', 1, 'Fire Station', 'Premnagar', 'EAST', 1, 2, 1, 1),
+                ('UK07-PV-100', 'Police', 2, 'City Police', 'ISBT', 'SOUTH', 0, 1, 1, 1),
+                ('UK07-CR-112', 'Car', 1, 'Paltan Bazaar', 'Rajpur Road', 'NORTH', 0, 2, 3, 0),
+                ('UK07-CR-113', 'Car', 2, 'Ballupur', 'GMS Road', 'WEST', 2, 2, 4, 0),
             ]
         elif scenario == 'HEAVY':
-            # 16 vehicles across all junctions
+            # 16 vehicles distributed evenly across all 4 junctions
             for i in range(16):
                 j_id = (i % 4) + 1
                 dirs = ['NORTH', 'SOUTH', 'EAST', 'WEST']
                 dir_val = dirs[i % 4]
                 v_type = 'Bus' if i % 3 == 0 else 'Car'
+                burst = 2 if v_type == 'Bus' else 1
                 prio = 2 if v_type == 'Bus' else 3
-                vehicles.append((f'UK07-HV-{1000+i}', v_type, j_id, 'Source', 'Dest', dir_val, i // 2, 3, prio, 0))
+                vehicles.append((f'UK07-HV-{1000+i}', v_type, j_id, 'Source', 'Dest', dir_val, i // 4, burst, prio, 0))
         elif scenario == 'ACCIDENT':
             vehicles = [
-                ('UK07-CR-201', 'Car', 1, 'Source', 'Dest', 'NORTH', 0, 3, 3, 0),
-                ('UK07-CR-202', 'Car', 1, 'Source', 'Dest', 'NORTH', 1, 3, 3, 0),
-                ('UK07-EM-999', 'Ambulance', 1, 'Hospital', 'Accident Site', 'EAST', 2, 2, 1, 1),
-                ('UK07-CR-203', 'Car', 2, 'Source', 'Dest', 'SOUTH', 0, 4, 3, 0),
+                ('UK07-CR-201', 'Car', 1, 'Source', 'Dest', 'NORTH', 0, 2, 3, 0),
+                ('UK07-CR-202', 'Car', 1, 'Source', 'Dest', 'NORTH', 1, 2, 3, 0),
+                ('UK07-EM-999', 'Ambulance', 1, 'Hospital', 'Accident Site', 'EAST', 2, 1, 1, 1),
+                ('UK07-CR-203', 'Car', 2, 'Source', 'Dest', 'SOUTH', 0, 2, 3, 0),
             ]
         elif scenario == 'ROAD_CLOSURE':
             vehicles = [
-                ('UK07-BS-401', 'Bus', 1, 'Haridwar', 'Dehradun', 'SOUTH', 0, 5, 2, 0),
-                ('UK07-CR-402', 'Car', 2, 'Ballupur', 'Chakrata', 'WEST', 1, 3, 3, 0),
-                ('UK07-CR-403', 'Car', 3, 'ISBT', 'Prince Chowk', 'NORTH', 2, 3, 3, 0),
+                ('UK07-BS-401', 'Bus', 1, 'Haridwar', 'Dehradun', 'SOUTH', 0, 2, 2, 0),
+                ('UK07-CR-402', 'Car', 2, 'Ballupur', 'Chakrata', 'WEST', 1, 2, 3, 0),
+                ('UK07-CR-403', 'Car', 3, 'ISBT', 'Prince Chowk', 'NORTH', 2, 2, 3, 0),
             ]
         elif scenario == 'BUS_PRIORITY':
             vehicles = [
-                ('UK07-PB-701', 'Bus', 1, 'Intercity Term', 'City Center', 'NORTH', 0, 4, 2, 0),
-                ('UK07-PB-702', 'Bus', 1, 'ISBT Express', 'Clock Tower', 'NORTH', 1, 4, 2, 0),
-                ('UK07-CR-703', 'Car', 1, 'Local', 'Market', 'EAST', 0, 2, 4, 0),
-                ('UK07-CR-704', 'Car', 2, 'Local', 'Market', 'WEST', 1, 3, 4, 0),
+                ('UK07-PB-701', 'Bus', 1, 'Intercity Term', 'City Center', 'NORTH', 0, 2, 2, 0),
+                ('UK07-PB-702', 'Bus', 1, 'ISBT Express', 'Clock Tower', 'NORTH', 1, 2, 2, 0),
+                ('UK07-CR-703', 'Car', 1, 'Local', 'Market', 'EAST', 0, 1, 4, 0),
+                ('UK07-CR-704', 'Car', 2, 'Local', 'Market', 'WEST', 1, 2, 4, 0),
             ]
         else: # NORMAL / MIXED
             vehicles = [
-                ('UK07-AX-1011', 'Car', 1, 'Paltan Bazaar', 'Rajpur Road', 'NORTH', 0, 3, 3, 0),
-                ('UK07-EM-9999', 'Ambulance', 1, 'Doon Hospital', 'Max Hospital', 'NORTH', 1, 2, 1, 1),
-                ('UK07-PA-4022', 'Bus', 1, 'Rispana Pull', 'Clock Tower', 'SOUTH', 1, 5, 2, 0),
-                ('UK07-BX-3044', 'Car', 1, 'Subhash Road', 'Chakrata Rd', 'EAST', 2, 3, 4, 0),
-                ('UK07-TX-8801', 'Truck', 2, 'Premnagar', 'Ballupur', 'WEST', 0, 4, 4, 0),
-                ('UK07-FT-1010', 'Fire Truck', 2, 'Fire Station', 'IMA BloodBank', 'EAST', 1, 3, 1, 1),
-                ('UK07-CX-7722', 'Car', 2, 'Vasant Vihar', 'Kaulagarh', 'NORTH', 2, 2, 3, 0),
-                ('UK07-PB-5501', 'Bus', 3, 'Haridwar By', 'ISBT Terminal', 'SOUTH', 0, 6, 2, 0),
-                ('UK07-PV-0012', 'Police', 3, 'Patel Nagar', 'Cantonment', 'NORTH', 1, 2, 1, 1),
-                ('UK07-DX-6633', 'Car', 3, 'Kargi Chowk', 'ISBT Flyover', 'WEST', 3, 3, 3, 0),
-                ('UK07-EX-2211', 'Motorcycle', 4, 'Railway Stn', 'Gandhi Road', 'EAST', 0, 2, 4, 0),
-                ('UK07-FX-4499', 'Car', 4, 'Saharanpur Rd', 'Prince Chowk', 'WEST', 1, 3, 3, 0),
+                ('UK07-AX-1011', 'Car', 1, 'Paltan Bazaar', 'Rajpur Road', 'NORTH', 0, 1, 3, 0),
+                ('UK07-EM-9999', 'Ambulance', 1, 'Doon Hospital', 'Max Hospital', 'NORTH', 1, 1, 1, 1),
+                ('UK07-PA-4022', 'Bus', 1, 'Rispana Pull', 'Clock Tower', 'SOUTH', 1, 2, 2, 0),
+                ('UK07-BX-3044', 'Car', 1, 'Subhash Road', 'Chakrata Rd', 'EAST', 2, 1, 4, 0),
+                ('UK07-TX-8801', 'Truck', 2, 'Premnagar', 'Ballupur', 'WEST', 0, 2, 4, 0),
+                ('UK07-FT-1010', 'Fire Truck', 2, 'Fire Station', 'IMA BloodBank', 'EAST', 1, 2, 1, 1),
+                ('UK07-CX-7722', 'Car', 2, 'Vasant Vihar', 'Kaulagarh', 'NORTH', 2, 1, 3, 0),
+                ('UK07-PB-5501', 'Bus', 3, 'Haridwar By', 'ISBT Terminal', 'SOUTH', 0, 2, 2, 0),
+                ('UK07-PV-0012', 'Police', 3, 'Patel Nagar', 'Cantonment', 'NORTH', 1, 1, 1, 1),
+                ('UK07-DX-6633', 'Car', 3, 'Kargi Chowk', 'ISBT Flyover', 'WEST', 2, 1, 3, 0),
+                ('UK07-EX-2211', 'Motorcycle', 4, 'Railway Stn', 'Gandhi Road', 'EAST', 0, 1, 4, 0),
+                ('UK07-FX-4499', 'Car', 4, 'Saharanpur Rd', 'Prince Chowk', 'WEST', 1, 1, 3, 0),
             ]
 
         for plate, v_type, j_id, src, dst, direction, arr, burst, prio, is_emerg in vehicles:

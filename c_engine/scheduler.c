@@ -354,333 +354,278 @@ Direction selectAdaptiveGreenDirection(Junction *j, const Vehicle vehicles[], in
 
 
 
-/*
+/* =========================================================
+   CONCURRENT MULTI-JUNCTION SCHEDULER INFRASTRUCTURE
+   Each junction acts as an independent execution unit/core.
+   ========================================================= */
 
-   FCFS ALGORITHM */
+typedef struct {
+    int vehicle_id;
+    int start_time;
+    int arrival_time;
+    int junction_id;
+} ExecSlice;
+
+static int getDistinctJunctions(TrafficSimulation *sim, int junc_ids[MAX_JUNCTIONS]) {
+    int count = 0;
+    for (int j = 0; j < sim->junction_count; j++) {
+        int id = sim->junctions[j].junction_id;
+        int found = 0;
+        for (int k = 0; k < count; k++) {
+            if (junc_ids[k] == id) { found = 1; break; }
+        }
+        if (!found && count < MAX_JUNCTIONS) {
+            junc_ids[count++] = id;
+        }
+    }
+    for (int i = 0; i < sim->vehicle_count; i++) {
+        int id = sim->vehicles[i].junction_id;
+        int found = 0;
+        for (int k = 0; k < count; k++) {
+            if (junc_ids[k] == id) { found = 1; break; }
+        }
+        if (!found && count < MAX_JUNCTIONS) {
+            junc_ids[count++] = id;
+        }
+    }
+    return count;
+}
+
+static void sortAndPopulateExecutionOrder(TrafficSimulation *sim, ExecSlice *slices, int slice_count) {
+    for (int i = 0; i < slice_count - 1; i++) {
+        for (int k = 0; k < slice_count - 1 - i; k++) {
+            int swap = 0;
+            if (slices[k].start_time > slices[k + 1].start_time) {
+                swap = 1;
+            } else if (slices[k].start_time == slices[k + 1].start_time) {
+                if (slices[k].arrival_time > slices[k + 1].arrival_time) {
+                    swap = 1;
+                } else if (slices[k].arrival_time == slices[k + 1].arrival_time) {
+                    if (slices[k].vehicle_id > slices[k + 1].vehicle_id) {
+                        swap = 1;
+                    }
+                }
+            }
+            if (swap) {
+                ExecSlice tmp = slices[k];
+                slices[k] = slices[k + 1];
+                slices[k + 1] = tmp;
+            }
+        }
+    }
+
+    sim->execution_order_len = 0;
+    for (int i = 0; i < slice_count; i++) {
+        if (sim->execution_order_len < MAX_VEHICLES * 10) {
+            sim->execution_order[sim->execution_order_len++] = slices[i].vehicle_id;
+        }
+    }
+}
+
+static void finalizeSimulationMetrics(TrafficSimulation *sim) {
+    int max_completion = 0;
+    for (int i = 0; i < sim->vehicle_count; i++) {
+        if (sim->scheduled_vehicles[i].completion_time > max_completion) {
+            max_completion = sim->scheduled_vehicles[i].completion_time;
+        }
+    }
+    sim->metrics.total_time = max_completion;
+    computePerformanceMetrics(sim);
+}
+
+/* =========================================================
+   FCFS ALGORITHM (PARALLEL MULTI-JUNCTION)
+   ========================================================= */
 
 void runFCFS(TrafficSimulation *sim) {
-
     if (!sim || sim->vehicle_count == 0) return;
-
     resetSimulationState(sim);
 
-
-
     int n = sim->vehicle_count;
-
     Vehicle *v = sim->scheduled_vehicles;
 
-    int completed = 0;
+    int junc_ids[MAX_JUNCTIONS];
+    int num_juncs = getDistinctJunctions(sim, junc_ids);
 
-    int current_time = 0;
+    ExecSlice slices[MAX_VEHICLES * 4];
+    int slice_count = 0;
 
-
-
-    while (completed < n) {
-
-        int selected = -1;
-
-
-
-        /* Find arrived vehicle with earliest arrival time */
-
+    for (int ji = 0; ji < num_juncs; ji++) {
+        int current_junc_id = junc_ids[ji];
+        int junc_completed = 0;
+        int junc_total = 0;
         for (int i = 0; i < n; i++) {
-
-            if (v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
-
-                if (selected == -1 || v[i].arrival_time < v[selected].arrival_time) {
-
-                    selected = i;
-
-                }
-
-            }
-
+            if (v[i].junction_id == current_junc_id) junc_total++;
         }
+        if (junc_total == 0) continue;
 
-
-
-        /* CPU / Intersection Idle: fast-forward to next arrival */
-
-        if (selected == -1) {
-
-            int next_arrival = 1e9;
-
+        int current_time = 0;
+        while (junc_completed < junc_total) {
+            int selected = -1;
             for (int i = 0; i < n; i++) {
-
-                if (v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arrival) {
-
-                    next_arrival = v[i].arrival_time;
-
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    if (selected == -1 || v[i].arrival_time < v[selected].arrival_time) {
+                        selected = i;
+                    }
                 }
-
             }
 
-            if (next_arrival < 1e9) {
-
-                current_time = next_arrival;
-
-            } else {
-
-                break;
-
+            if (selected == -1) {
+                int next_arrival = 1e9;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arrival) {
+                        next_arrival = v[i].arrival_time;
+                    }
+                }
+                if (next_arrival < 1e9) {
+                    current_time = next_arrival;
+                } else {
+                    break;
+                }
+                continue;
             }
 
-            continue;
+            v[selected].start_time = current_time;
+            v[selected].state = STATE_RUNNING;
+            logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "STARTED", "Vehicle entered junction intersection (FCFS)");
 
+            if (slice_count < MAX_VEHICLES * 4) {
+                slices[slice_count].vehicle_id = v[selected].id;
+                slices[slice_count].start_time = current_time;
+                slices[slice_count].arrival_time = v[selected].arrival_time;
+                slices[slice_count].junction_id = v[selected].junction_id;
+                slice_count++;
+            }
+
+            current_time += v[selected].burst_time;
+            v[selected].completion_time = current_time;
+            v[selected].turnaround_time = v[selected].completion_time - v[selected].arrival_time;
+            v[selected].waiting_time = v[selected].turnaround_time - v[selected].burst_time;
+            if (v[selected].waiting_time < 0) v[selected].waiting_time = 0;
+            v[selected].remaining_time = 0;
+            v[selected].state = STATE_COMPLETED;
+
+            logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "COMPLETED", "Vehicle cleared intersection");
+            junc_completed++;
         }
-
-
-
-        /* Execute selected vehicle */
-
-        v[selected].start_time = current_time;
-
-        v[selected].state = STATE_RUNNING;
-
-        logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "STARTED", "Vehicle entered junction intersection (FCFS)");
-
-
-
-        if (sim->execution_order_len < MAX_VEHICLES * 10) {
-
-            sim->execution_order[sim->execution_order_len++] = v[selected].id;
-
-        }
-
-
-
-        current_time += v[selected].burst_time;
-
-        v[selected].completion_time = current_time;
-
-        v[selected].turnaround_time = v[selected].completion_time - v[selected].arrival_time;
-
-        v[selected].waiting_time = v[selected].turnaround_time - v[selected].burst_time;
-
-        if (v[selected].waiting_time < 0) v[selected].waiting_time = 0;
-
-        v[selected].remaining_time = 0;
-
-        v[selected].state = STATE_COMPLETED;
-
-
-
-        logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "COMPLETED", "Vehicle cleared intersection");
-
-        completed++;
-
     }
 
-
-
-    sim->metrics.total_time = current_time;
-
-    computePerformanceMetrics(sim);
-
+    sortAndPopulateExecutionOrder(sim, slices, slice_count);
+    finalizeSimulationMetrics(sim);
 }
 
-
-
 /* =========================================================
-
-   PRIORITY ALGORITHM WITH AGING
-
+   PRIORITY ALGORITHM WITH AGING (PARALLEL MULTI-JUNCTION)
    ========================================================= */
-
-
 
 void runPriority(TrafficSimulation *sim, int enable_aging) {
-
     if (!sim || sim->vehicle_count == 0) return;
-
     resetSimulationState(sim);
 
-
-
     int n = sim->vehicle_count;
-
     Vehicle *v = sim->scheduled_vehicles;
-
-    int completed = 0;
-
-    int current_time = 0;
-
     int aging_thresh = (sim->aging_threshold > 0) ? sim->aging_threshold : 5;
 
+    int junc_ids[MAX_JUNCTIONS];
+    int num_juncs = getDistinctJunctions(sim, junc_ids);
 
+    ExecSlice slices[MAX_VEHICLES * 4];
+    int slice_count = 0;
 
-    while (completed < n) {
-
-        /* Apply aging to waiting vehicles if enabled */
-
-        if (enable_aging) {
-
-            for (int i = 0; i < n; i++) {
-
-                if (v[i].state == STATE_WAITING && v[i].arrival_time <= current_time) {
-
-                    int current_wait = current_time - v[i].arrival_time;
-
-                    /* Every aging_thresh units of waiting time, improve priority by 1 (down to min 1) */
-
-                    int target_boost = current_wait / aging_thresh;
-
-                    if (target_boost > v[i].aging_boost && v[i].priority > 1) {
-
-                        v[i].aging_boost = target_boost;
-
-                        int old_prio = v[i].priority;
-
-                        v[i].priority = v[i].initial_priority - v[i].aging_boost;
-
-                        if (v[i].priority < 1) v[i].priority = 1;
-
-                        if (old_prio != v[i].priority) {
-
-                            char details[128];
-
-                            snprintf(details, sizeof(details), "Priority boosted from %d to %d (waited %ds)", old_prio, v[i].priority, current_wait);
-
-                            logScheduleEvent(sim, current_time, v[i].id, v[i].junction_id, v[i].direction, "AGED", details);
-
-                        }
-
-                    }
-
-                }
-
-            }
-
-        }
-
-
-
-        /* Select arrived vehicle with highest priority (lowest numerical value) */
-
-        int selected = -1;
-
+    for (int ji = 0; ji < num_juncs; ji++) {
+        int current_junc_id = junc_ids[ji];
+        int junc_completed = 0;
+        int junc_total = 0;
         for (int i = 0; i < n; i++) {
+            if (v[i].junction_id == current_junc_id) junc_total++;
+        }
+        if (junc_total == 0) continue;
 
-            if (v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
-
-                if (selected == -1 || v[i].priority < v[selected].priority) {
-
-                    selected = i;
-
-                } else if (v[i].priority == v[selected].priority) {
-
-                    /* Tie-breaker: earlier arrival time */
-
-                    if (v[i].arrival_time < v[selected].arrival_time) {
-
-                        selected = i;
-
+        int current_time = 0;
+        while (junc_completed < junc_total) {
+            if (enable_aging) {
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state == STATE_WAITING && v[i].arrival_time <= current_time) {
+                        int current_wait = current_time - v[i].arrival_time;
+                        int target_boost = current_wait / aging_thresh;
+                        if (target_boost > v[i].aging_boost && v[i].priority > 1) {
+                            v[i].aging_boost = target_boost;
+                            int old_prio = v[i].priority;
+                            v[i].priority = v[i].initial_priority - v[i].aging_boost;
+                            if (v[i].priority < 1) v[i].priority = 1;
+                            if (old_prio != v[i].priority) {
+                                char details[128];
+                                snprintf(details, sizeof(details), "Priority boosted from %d to %d (waited %ds)", old_prio, v[i].priority, current_wait);
+                                logScheduleEvent(sim, current_time, v[i].id, v[i].junction_id, v[i].direction, "AGED", details);
+                            }
+                        }
                     }
-
                 }
-
             }
 
-        }
-
-
-
-        /* If none available, advance clock */
-
-        if (selected == -1) {
-
-            int next_arrival = 1e9;
-
+            int selected = -1;
             for (int i = 0; i < n; i++) {
-
-                if (v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arrival) {
-
-                    next_arrival = v[i].arrival_time;
-
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    if (selected == -1 || v[i].priority < v[selected].priority) {
+                        selected = i;
+                    } else if (v[i].priority == v[selected].priority) {
+                        if (v[i].arrival_time < v[selected].arrival_time) {
+                            selected = i;
+                        }
+                    }
                 }
-
             }
 
-            if (next_arrival < 1e9) {
-
-                current_time = next_arrival;
-
-            } else {
-
-                break;
-
+            if (selected == -1) {
+                int next_arrival = 1e9;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arrival) {
+                        next_arrival = v[i].arrival_time;
+                    }
+                }
+                if (next_arrival < 1e9) {
+                    current_time = next_arrival;
+                } else {
+                    break;
+                }
+                continue;
             }
 
-            continue;
+            v[selected].start_time = current_time;
+            v[selected].state = STATE_RUNNING;
+            char start_desc[128];
+            snprintf(start_desc, sizeof(start_desc), "Vehicle entered junction (Priority=%d, Emergency=%s)",
+                     v[selected].priority, v[selected].is_emergency ? "YES" : "NO");
+            logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "STARTED", start_desc);
 
+            if (slice_count < MAX_VEHICLES * 4) {
+                slices[slice_count].vehicle_id = v[selected].id;
+                slices[slice_count].start_time = current_time;
+                slices[slice_count].arrival_time = v[selected].arrival_time;
+                slices[slice_count].junction_id = v[selected].junction_id;
+                slice_count++;
+            }
+
+            current_time += v[selected].burst_time;
+            v[selected].completion_time = current_time;
+            v[selected].turnaround_time = v[selected].completion_time - v[selected].arrival_time;
+            v[selected].waiting_time = v[selected].turnaround_time - v[selected].burst_time;
+            if (v[selected].waiting_time < 0) v[selected].waiting_time = 0;
+            v[selected].remaining_time = 0;
+            v[selected].state = STATE_COMPLETED;
+
+            logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "COMPLETED", "Vehicle cleared intersection");
+            junc_completed++;
         }
-
-
-
-        /* Execute vehicle */
-
-        v[selected].start_time = current_time;
-
-        v[selected].state = STATE_RUNNING;
-
-        char start_desc[128];
-
-        snprintf(start_desc, sizeof(start_desc), "Vehicle entered junction (Priority=%d, Emergency=%s)",
-
-                 v[selected].priority, v[selected].is_emergency ? "YES" : "NO");
-
-        logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "STARTED", start_desc);
-
-
-
-        if (sim->execution_order_len < MAX_VEHICLES * 10) {
-
-            sim->execution_order[sim->execution_order_len++] = v[selected].id;
-
-        }
-
-
-
-        current_time += v[selected].burst_time;
-
-        v[selected].completion_time = current_time;
-
-        v[selected].turnaround_time = v[selected].completion_time - v[selected].arrival_time;
-
-        v[selected].waiting_time = v[selected].turnaround_time - v[selected].burst_time;
-
-        if (v[selected].waiting_time < 0) v[selected].waiting_time = 0;
-
-        v[selected].remaining_time = 0;
-
-        v[selected].state = STATE_COMPLETED;
-
-
-
-        logScheduleEvent(sim, current_time, v[selected].id, v[selected].junction_id, v[selected].direction, "COMPLETED", "Vehicle cleared intersection");
-
-        completed++;
-
     }
 
-
-
-    sim->metrics.total_time = current_time;
-
-    computePerformanceMetrics(sim);
-
+    sortAndPopulateExecutionOrder(sim, slices, slice_count);
+    finalizeSimulationMetrics(sim);
 }
 
-
-
 /* =========================================================
-
-   ROUND ROBIN ALGORITHM
-
+   ROUND ROBIN ALGORITHM (PARALLEL MULTI-JUNCTION)
    ========================================================= */
-
-
 
 static int enqueueRoundRobin(int queue[], int *rear, int *count, int index)
 {
@@ -693,9 +638,7 @@ static int enqueueRoundRobin(int queue[], int *rear, int *count, int index)
 
 void runRoundRobin(TrafficSimulation *sim)
 {
-    if (sim == NULL || sim->vehicle_count <= 0 ||
-        sim->vehicle_count > MAX_VEHICLES) {
-        fprintf(stderr, "Error: Invalid simulation or vehicle count.\n");
+    if (sim == NULL || sim->vehicle_count <= 0 || sim->vehicle_count > MAX_VEHICLES) {
         return;
     }
 
@@ -705,10 +648,7 @@ void runRoundRobin(TrafficSimulation *sim)
 
     int n = sim->vehicle_count;
     for (int i = 0; i < n; i++) {
-        if (sim->vehicles[i].burst_time <= 0 ||
-            sim->vehicles[i].arrival_time < 0) {
-            fprintf(stderr, "Error: Invalid burst time or arrival time for vehicle %d.\n",
-                    sim->vehicles[i].id);
+        if (sim->vehicles[i].burst_time <= 0 || sim->vehicles[i].arrival_time < 0) {
             return;
         }
     }
@@ -717,404 +657,258 @@ void runRoundRobin(TrafficSimulation *sim)
 
     Vehicle *v = sim->scheduled_vehicles;
     const int quantum = sim->quantum;
-    int queue[MAX_VEHICLES];
-    int front = 0, rear = 0, qcount = 0;
-    int visited[MAX_VEHICLES] = {0};
-    int completed = 0;
-    int current_time = 0;
 
-    while (completed < n) {
-        /* Add all vehicles that have arrived by the current time. */
+    int junc_ids[MAX_JUNCTIONS];
+    int num_juncs = getDistinctJunctions(sim, junc_ids);
+
+    ExecSlice slices[MAX_VEHICLES * 10];
+    int slice_count = 0;
+
+    for (int ji = 0; ji < num_juncs; ji++) {
+        int current_junc_id = junc_ids[ji];
+        int junc_completed = 0;
+        int junc_total = 0;
         for (int i = 0; i < n; i++) {
-            if (!visited[i] && v[i].arrival_time <= current_time) {
-                if (!enqueueRoundRobin(queue, &rear, &qcount, i)) {
-                    fprintf(stderr, "Error: Round Robin ready queue overflow.\n");
-                    return;
-                }
-                visited[i] = 1;
-            }
+            if (v[i].junction_id == current_junc_id) junc_total++;
         }
+        if (junc_total == 0) continue;
 
-        /* If no vehicle is ready, jump to the next arrival time. */
-        if (qcount == 0) {
-            int next_index = -1;
+        int queue[MAX_VEHICLES];
+        int front = 0, rear = 0, qcount = 0;
+        int visited[MAX_VEHICLES] = {0};
+        int current_time = 0;
+
+        while (junc_completed < junc_total) {
             for (int i = 0; i < n; i++) {
-                if (!visited[i] &&
-                    (next_index == -1 ||
-                     v[i].arrival_time < v[next_index].arrival_time)) {
-                    next_index = i;
+                if (v[i].junction_id == current_junc_id && !visited[i] && v[i].arrival_time <= current_time) {
+                    enqueueRoundRobin(queue, &rear, &qcount, i);
+                    visited[i] = 1;
                 }
             }
-            if (next_index == -1) break;
-            current_time = v[next_index].arrival_time;
-            continue;
-        }
 
-        /* Dequeue one vehicle. */
-        int idx = queue[front];
-        front = (front + 1) % MAX_VEHICLES;
-        qcount--;
-
-        if (v[idx].remaining_time <= 0) {
-            v[idx].remaining_time = 0;
-            v[idx].completion_time = current_time;
-            v[idx].turnaround_time = current_time - v[idx].arrival_time;
-            v[idx].waiting_time = v[idx].turnaround_time - v[idx].burst_time;
-            if (v[idx].waiting_time < 0) v[idx].waiting_time = 0;
-            v[idx].state = STATE_COMPLETED;
-            completed++;
-            continue;
-        }
-
-        if (v[idx].start_time == -1) {
-            v[idx].start_time = current_time;
-            logScheduleEvent(sim, current_time, v[idx].id,
-                             v[idx].junction_id, v[idx].direction,
-                             "STARTED", "Vehicle started in Round Robin");
-        }
-        v[idx].state = STATE_RUNNING;
-
-        if (sim->execution_order_len < MAX_VEHICLES * 10) {
-            sim->execution_order[sim->execution_order_len++] = v[idx].id;
-        }
-
-        int exec_time = (v[idx].remaining_time > quantum)
-                      ? quantum : v[idx].remaining_time;
-        v[idx].remaining_time -= exec_time;
-        current_time += exec_time;
-
-        /* Arrivals during this time slice join before the preempted vehicle. */
-        for (int i = 0; i < n; i++) {
-            if (!visited[i] && v[i].arrival_time <= current_time) {
-                if (!enqueueRoundRobin(queue, &rear, &qcount, i)) {
-                    fprintf(stderr, "Error: Round Robin ready queue overflow.\n");
-                    return;
+            if (qcount == 0) {
+                int next_index = -1;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && !visited[i] &&
+                        (next_index == -1 || v[i].arrival_time < v[next_index].arrival_time)) {
+                        next_index = i;
+                    }
                 }
-                visited[i] = 1;
+                if (next_index == -1) break;
+                current_time = v[next_index].arrival_time;
+                continue;
             }
-        }
 
-        if (v[idx].remaining_time == 0) {
-            v[idx].completion_time = current_time;
-            v[idx].turnaround_time = v[idx].completion_time - v[idx].arrival_time;
-            v[idx].waiting_time = v[idx].turnaround_time - v[idx].burst_time;
-            if (v[idx].waiting_time < 0) v[idx].waiting_time = 0;
-            v[idx].state = STATE_COMPLETED;
-            completed++;
-            logScheduleEvent(sim, current_time, v[idx].id,
-                             v[idx].junction_id, v[idx].direction,
-                             "COMPLETED", "Finished execution in Round Robin");
-        } else {
-            v[idx].state = STATE_WAITING;
-            if (!enqueueRoundRobin(queue, &rear, &qcount, idx)) {
-                fprintf(stderr, "Error: Round Robin ready queue overflow.\n");
-                return;
+            int idx = queue[front];
+            front = (front + 1) % MAX_VEHICLES;
+            qcount--;
+
+            if (v[idx].start_time == -1) {
+                v[idx].start_time = current_time;
             }
+            v[idx].state = STATE_RUNNING;
+
+            if (slice_count < MAX_VEHICLES * 10) {
+                slices[slice_count].vehicle_id = v[idx].id;
+                slices[slice_count].start_time = current_time;
+                slices[slice_count].arrival_time = v[idx].arrival_time;
+                slices[slice_count].junction_id = v[idx].junction_id;
+                slice_count++;
+            }
+
+            int exec_time = (v[idx].remaining_time < quantum) ? v[idx].remaining_time : quantum;
             char details[128];
-            snprintf(details, sizeof(details),
-                     "Preempted after quantum; %d units remaining",
-                     v[idx].remaining_time);
-            logScheduleEvent(sim, current_time, v[idx].id,
-                             v[idx].junction_id, v[idx].direction,
-                             "PREEMPTED", details);
+            snprintf(details, sizeof(details), "Running %d time units (RR)", exec_time);
+            logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "STARTED", details);
+
+            current_time += exec_time;
+            v[idx].remaining_time -= exec_time;
+
+            for (int i = 0; i < n; i++) {
+                if (v[i].junction_id == current_junc_id && !visited[i] && v[i].arrival_time <= current_time) {
+                    enqueueRoundRobin(queue, &rear, &qcount, i);
+                    visited[i] = 1;
+                }
+            }
+
+            if (v[idx].remaining_time == 0) {
+                v[idx].completion_time = current_time;
+                v[idx].turnaround_time = v[idx].completion_time - v[idx].arrival_time;
+                v[idx].waiting_time = v[idx].turnaround_time - v[idx].burst_time;
+                if (v[idx].waiting_time < 0) v[idx].waiting_time = 0;
+                v[idx].state = STATE_COMPLETED;
+                junc_completed++;
+                logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "COMPLETED", "Finished execution in Round Robin");
+            } else {
+                v[idx].state = STATE_WAITING;
+                enqueueRoundRobin(queue, &rear, &qcount, idx);
+                char details_preempt[128];
+                snprintf(details_preempt, sizeof(details_preempt), "Preempted after quantum; %d units remaining", v[idx].remaining_time);
+                logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "PREEMPTED", details_preempt);
+            }
         }
     }
 
-    sim->metrics.total_time = current_time;
-    computePerformanceMetrics(sim);
+    sortAndPopulateExecutionOrder(sim, slices, slice_count);
+    finalizeSimulationMetrics(sim);
 }
+
 /* =========================================================
-
-   ADAPTIVE SCHEDULING ALGORITHM
-
+   ADAPTIVE SCHEDULING ALGORITHM (PARALLEL MULTI-JUNCTION)
    ========================================================= */
 
-
-
 void runAdaptive(TrafficSimulation *sim) {
-
     if (!sim || sim->vehicle_count == 0) return;
-
     resetSimulationState(sim);
 
-
-
     int n = sim->vehicle_count;
-
     Vehicle *v = sim->scheduled_vehicles;
 
-    int completed = 0;
+    int junc_ids[MAX_JUNCTIONS];
+    int num_juncs = getDistinctJunctions(sim, junc_ids);
 
-    int current_time = 0;
+    ExecSlice slices[MAX_VEHICLES * 10];
+    int slice_count = 0;
 
-
-
-    while (completed < n) {
-
-        /* Update waiting times for all pending arrived vehicles */
-
-        for (int i = 0; i < n; i++) {
-
-            if (v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
-
-                v[i].waiting_time = current_time - v[i].arrival_time;
-
-            }
-
-        }
-
-
-
-        /* Recompute queue counts per junction & direction for active arrived vehicles */
-
+    for (int ji = 0; ji < num_juncs; ji++) {
+        int current_junc_id = junc_ids[ji];
+        Junction *junc = NULL;
         for (int j = 0; j < sim->junction_count; j++) {
-
-            for (int d = 0; d < 4; d++) {
-
-                sim->junctions[j].queue_count[d] = 0;
-
-            }
-
-        }
-
-        for (int i = 0; i < n; i++) {
-
-            if (v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
-
-                for (int j = 0; j < sim->junction_count; j++) {
-
-                    if (sim->junctions[j].junction_id == v[i].junction_id) {
-
-                        sim->junctions[j].queue_count[v[i].direction]++;
-
-                        break;
-
-                    }
-
-                }
-
-            }
-
-        }
-
-
-
-        /* Check if any arrived vehicle exists across any junction */
-
-        int arrived_count = 0;
-
-        for (int i = 0; i < n; i++) {
-
-            if (v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
-
-                arrived_count++;
-
-            }
-
-        }
-
-
-
-        if (arrived_count == 0) {
-
-            int next_arr = 1e9;
-
-            for (int i = 0; i < n; i++) {
-
-                if (v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arr) {
-
-                    next_arr = v[i].arrival_time;
-
-                }
-
-            }
-
-            if (next_arr < 1e9) {
-
-                current_time = next_arr;
-
-                continue;
-
-            } else {
-
+            if (sim->junctions[j].junction_id == current_junc_id) {
+                junc = &sim->junctions[j];
                 break;
-
             }
-
         }
 
+        int junc_completed = 0;
+        int junc_total = 0;
+        for (int i = 0; i < n; i++) {
+            if (v[i].junction_id == current_junc_id) junc_total++;
+        }
+        if (junc_total == 0) continue;
 
-
-        /* For each junction with waiting vehicles, select best direction adaptively */
-
-        int progress_made = 0;
-
-        for (int j = 0; j < sim->junction_count; j++) {
-
-            Junction *junc = &sim->junctions[j];
-
-            int total_junc_queue = junc->queue_count[0] + junc->queue_count[1] + junc->queue_count[2] + junc->queue_count[3];
-
-            if (total_junc_queue == 0) continue;
-
-
-
-            Direction best_dir = selectAdaptiveGreenDirection(junc, v, n);
-
-            junc->active_direction = best_dir;
-
-
-
-            /* Set signal states: strictly mutual exclusion! Only selected direction is GREEN */
-
-            for (int d = 0; d < 4; d++) {
-
-                junc->signals[d] = (d == best_dir) ? SIGNAL_GREEN : SIGNAL_RED;
-
+        int current_time = 0;
+        while (junc_completed < junc_total) {
+            for (int i = 0; i < n; i++) {
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    v[i].waiting_time = current_time - v[i].arrival_time;
+                }
             }
 
+            if (junc) {
+                for (int d = 0; d < 4; d++) junc->queue_count[d] = 0;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                        junc->queue_count[v[i].direction]++;
+                    }
+                }
+            }
 
+            int arrived_count = 0;
+            for (int i = 0; i < n; i++) {
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    arrived_count++;
+                }
+            }
 
-            /* Calculate dynamic green time */
+            if (arrived_count == 0) {
+                int next_arr = 1e9;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arr) {
+                        next_arr = v[i].arrival_time;
+                    }
+                }
+                if (next_arr < 1e9) {
+                    current_time = next_arr;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            Direction best_dir = NORTH;
+            if (junc) {
+                best_dir = selectAdaptiveGreenDirection(junc, v, n);
+                junc->active_direction = best_dir;
+                for (int d = 0; d < 4; d++) {
+                    junc->signals[d] = (d == best_dir) ? SIGNAL_GREEN : SIGNAL_RED;
+                }
+            } else {
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                        best_dir = v[i].direction;
+                        break;
+                    }
+                }
+            }
 
             int has_emergency = 0;
-
             for (int i = 0; i < n; i++) {
-
-                if (v[i].junction_id == junc->junction_id &&
-
-                    v[i].direction == best_dir &&
-
-                    v[i].state != STATE_COMPLETED &&
-
-                    v[i].arrival_time <= current_time &&
-
-                    v[i].is_emergency) {
-
+                if (v[i].junction_id == current_junc_id && v[i].direction == best_dir &&
+                    v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time && v[i].is_emergency) {
                     has_emergency = 1;
-
                     break;
-
                 }
-
             }
 
-
-
-            int green_time = calculateGreenTimeDynamic(junc->queue_count[best_dir], has_emergency);
-
-            junc->green_time[best_dir] = green_time;
-
-
+            int q_len = junc ? junc->queue_count[best_dir] : 1;
+            int green_time = calculateGreenTimeDynamic(q_len, has_emergency);
+            if (junc) junc->green_time[best_dir] = green_time;
 
             char sig_msg[128];
-
             snprintf(sig_msg, sizeof(sig_msg), "Phase GREEN for %s (Queue: %d, GreenTime: %ds, Emergency: %s)",
-
-                     directionToString(best_dir), junc->queue_count[best_dir], green_time, has_emergency ? "YES" : "NO");
-
-            logScheduleEvent(sim, current_time, 0, junc->junction_id, best_dir, "SIGNAL_GREEN", sig_msg);
-
-
-
-            /* Serve vehicles in best direction under this green phase */
+                     directionToString(best_dir), q_len, green_time, has_emergency ? "YES" : "NO");
+            logScheduleEvent(sim, current_time, 0, current_junc_id, best_dir, "SIGNAL_GREEN", sig_msg);
 
             int time_spent_in_phase = 0;
+            int total_junc_queue = junc ? (junc->queue_count[0] + junc->queue_count[1] + junc->queue_count[2] + junc->queue_count[3]) : 1;
+            int progress_made = 0;
 
             for (int i = 0; i < n; i++) {
-
-                if (v[i].junction_id == junc->junction_id &&
-
-                    v[i].direction == best_dir &&
-
-                    v[i].state != STATE_COMPLETED &&
-
-                    v[i].arrival_time <= current_time + time_spent_in_phase) {
-
-
+                if (v[i].junction_id == current_junc_id && v[i].direction == best_dir &&
+                    v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time + time_spent_in_phase) {
 
                     if (v[i].start_time == -1) v[i].start_time = current_time + time_spent_in_phase;
-
                     v[i].state = STATE_RUNNING;
 
-
-
-                    if (sim->execution_order_len < MAX_VEHICLES * 10) {
-
-                        sim->execution_order[sim->execution_order_len++] = v[i].id;
-
+                    if (slice_count < MAX_VEHICLES * 10) {
+                        slices[slice_count].vehicle_id = v[i].id;
+                        slices[slice_count].start_time = current_time + time_spent_in_phase;
+                        slices[slice_count].arrival_time = v[i].arrival_time;
+                        slices[slice_count].junction_id = v[i].junction_id;
+                        slice_count++;
                     }
-
-
 
                     int exec_time = v[i].burst_time;
-
                     time_spent_in_phase += exec_time;
-
-
-
                     v[i].completion_time = current_time + time_spent_in_phase;
-
                     v[i].turnaround_time = v[i].completion_time - v[i].arrival_time;
-
                     v[i].waiting_time = v[i].turnaround_time - v[i].burst_time;
-
                     if (v[i].waiting_time < 0) v[i].waiting_time = 0;
-
                     v[i].remaining_time = 0;
-
                     v[i].state = STATE_COMPLETED;
 
-
-
                     logScheduleEvent(sim, v[i].completion_time, v[i].id, v[i].junction_id, v[i].direction, "COMPLETED", "Cleared junction in Adaptive green phase");
-
-                    completed++;
-
+                    junc_completed++;
                     progress_made = 1;
 
-
-
-                    /* If time spent exceeds allocated dynamic green time and others are waiting, switch phase */
-
-                    if (time_spent_in_phase >= green_time && (total_junc_queue - junc->queue_count[best_dir]) > 0) {
-
+                    if (time_spent_in_phase >= green_time && (total_junc_queue - q_len) > 0) {
                         break;
-
                     }
-
                 }
-
             }
-
-
 
             if (time_spent_in_phase > 0) {
-
                 current_time += time_spent_in_phase;
-
+            } else if (!progress_made) {
+                current_time++;
             }
-
         }
-
-
-
-        if (!progress_made) {
-
-            current_time++;
-
-        }
-
     }
 
-
-
-    sim->metrics.total_time = current_time;
-
-    computePerformanceMetrics(sim);
-
+    sortAndPopulateExecutionOrder(sim, slices, slice_count);
+    finalizeSimulationMetrics(sim);
 }
-
 
 
 /* =========================================================

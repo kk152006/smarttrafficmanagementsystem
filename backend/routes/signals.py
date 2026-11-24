@@ -40,12 +40,25 @@ def manual_signal_control():
 
     execute_transaction(ops)
 
+    # Return current signal states for all directions so callers can verify mutual exclusion
+    from backend.database import query_all
+    current_signals = query_all(
+        "SELECT direction, state, green_time FROM traffic_signals WHERE junction_id = %s ORDER BY direction",
+        (junction_id,)
+    )
+
     return jsonify({
         "status": "SUCCESS",
         "message": f"Manual signal override applied at Junction {junction_id}: {direction} is GREEN (Conflicting directions set to RED)",
         "junction_id": junction_id,
         "active_direction": direction,
-        "green_time": green_time
+        "green_time": green_time,
+        "data": {
+            "junction_id": junction_id,
+            "active_direction": direction,
+            "green_time": green_time,
+            "signals": current_signals
+        }
     })
 
 @signals_bp.route('/automatic', methods=['POST'])

@@ -58,7 +58,37 @@ def create_incident():
     created = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (new_id,))
     return jsonify({"status": "SUCCESS", "data": created}), 201
 
-@incidents_bp.route('/<int:inc_id>/resolve', methods=['PUT'])
+@incidents_bp.route('/<int:inc_id>', methods=['GET'])
+def get_incident(inc_id):
+    inc = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (inc_id,))
+    if not inc:
+        return jsonify({"status": "ERROR", "message": f"Incident {inc_id} not found"}), 404
+    return jsonify({"status": "SUCCESS", "data": inc})
+
+@incidents_bp.route('/<int:inc_id>', methods=['PUT'])
+def update_incident(inc_id):
+    inc = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (inc_id,))
+    if not inc:
+        return jsonify({"status": "ERROR", "message": f"Incident {inc_id} not found"}), 404
+    data = request.get_json() or {}
+    severity = data.get('severity', inc['severity'])
+    description = data.get('description', inc['description'])
+    execute_commit(
+        "UPDATE traffic_incidents SET severity = %s, description = %s WHERE id = %s",
+        (severity, description, inc_id)
+    )
+    updated = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (inc_id,))
+    return jsonify({"status": "SUCCESS", "data": updated})
+
+@incidents_bp.route('/<int:inc_id>', methods=['DELETE'])
+def delete_incident(inc_id):
+    inc = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (inc_id,))
+    if not inc:
+        return jsonify({"status": "ERROR", "message": f"Incident {inc_id} not found"}), 404
+    execute_commit("DELETE FROM traffic_incidents WHERE id = %s", (inc_id,))
+    return jsonify({"status": "SUCCESS", "message": f"Incident {inc_id} deleted"})
+
+@incidents_bp.route('/<int:inc_id>/resolve', methods=['PUT', 'POST'])
 def resolve_incident(inc_id):
     inc = query_one("SELECT * FROM traffic_incidents WHERE id = %s", (inc_id,))
     if not inc:

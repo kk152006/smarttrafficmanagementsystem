@@ -118,6 +118,10 @@
         <button class="btn btn-success" id="btn-resume-sim">Resume</button>
         <button class="btn btn-danger" id="btn-reset-sim">Reset</button>
         <button class="btn btn-outline" id="btn-run-benchmark">Benchmark All</button>
+        <a href="/simulation" target="_blank" class="btn" id="btn-open-2d-sim" style="background: linear-gradient(135deg, #10b981, #059669); color: white; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
+          <span style="font-size: 1rem;">🚗</span>
+          2D Road Simulation
+        </a>
       </div>
     </section>
 
@@ -128,23 +132,119 @@
         
         <!-- GIS Map Card -->
         <div class="card">
-          <div class="card-header">
-            <h2>Dehradun Metropolitan Traffic Grid</h2>
-            <span class="badge badge-running" id="sim-status-badge">ACTIVE</span>
+          <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <h2>Dehradun Metropolitan Traffic Grid</h2>
+              <span class="badge badge-running" id="sim-status-badge">ACTIVE</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 600;">SIGNAL CONTROLLER:</span>
+              <span class="badge" id="hud-signal-mode-badge" style="background: #1e3a8a; color: white;">ADAPTIVE AUTO</span>
+            </div>
           </div>
-          <div class="card-body" style="padding: 0;">
+
+          <!-- Simulation Visual Controller & Live HUD -->
+          <div class="sim-map-hud">
+            <div class="hud-group">
+              <button class="btn btn-sm btn-primary" id="btn-toggle-motion">
+                <span id="motion-btn-icon">⏸️</span> <span id="motion-btn-text">Pause Motion</span>
+              </button>
+              <div class="hud-speed-group">
+                <span style="font-size: 0.75rem; font-weight: 600; color: #475569;">Speed:</span>
+                <button class="hud-speed-btn active" data-speed="1">1x</button>
+                <button class="hud-speed-btn" data-speed="2">2x</button>
+                <button class="hud-speed-btn" data-speed="4">4x</button>
+              </div>
+            </div>
+
+            <div class="hud-stats">
+              <div class="hud-stat-item">
+                <span class="stat-dot green"></span>
+                <span>Moving: <b id="hud-moving-count">0</b></span>
+              </div>
+              <div class="hud-stat-item">
+                <span class="stat-dot red"></span>
+                <span>Queued (Red): <b id="hud-queued-count">0</b></span>
+              </div>
+              <div class="hud-stat-item">
+                <span class="stat-dot blue"></span>
+                <span>Cleared: <b id="hud-cleared-count">0</b></span>
+              </div>
+            </div>
+
+            <div class="hud-actions">
+              <button class="btn btn-sm btn-outline" id="btn-quick-car" title="Spawn standard car">+ 🚗 Car</button>
+              <button class="btn btn-sm btn-outline" id="btn-quick-bus" title="Spawn public transit bus">+ 🚌 Bus</button>
+              <button class="btn btn-sm btn-danger" id="btn-quick-emerg" title="Inject emergency vehicle with siren">+ 🚨 Ambulance</button>
+              <button class="btn btn-sm btn-outline" id="btn-reset-fleet" title="Clear and respawn simulation fleet">🔄 Reset Cars</button>
+            </div>
+          </div>
+
+          <div class="card-body" style="padding: 0; position: relative;">
             <div id="leaflet-map"></div>
           </div>
         </div>
 
         <!-- Vehicle Queue Table Card -->
         <div class="card">
-          <div class="card-header">
-            <h2>Vehicle Process Queue (OS Simulation)</h2>
-            <button class="btn btn-primary" id="btn-open-add-vehicle" style="padding: 4px 10px; font-size: 0.8rem;">
-              + Add Vehicle
-            </button>
+          <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <h2>Vehicle Process Queue (OS Simulation)</h2>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">Processes scheduled via CPU algorithms</span>
+            </div>
+            <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
+              <button class="btn btn-primary" id="btn-open-add-vehicle" style="padding: 5px 10px; font-size: 0.8rem;">
+                + Add Vehicle
+              </button>
+              <button class="btn btn-danger" id="btn-quick-emergency" style="padding: 5px 10px; font-size: 0.8rem;" title="1-Click spawn an emergency vehicle">
+                🚨 Quick Ambulance
+              </button>
+              <button class="btn btn-outline" id="btn-open-batch-modal" style="padding: 5px 10px; font-size: 0.8rem;" title="Inject random batch of vehicles">
+                🎲 Batch Spawn
+              </button>
+              <button class="btn btn-outline" id="btn-clear-completed" style="padding: 5px 8px; font-size: 0.78rem;" title="Remove completed vehicles">
+                🧹 Clear Done
+              </button>
+              <button class="btn btn-outline" id="btn-clear-all" style="padding: 5px 8px; font-size: 0.78rem; color: var(--signal-red);" title="Clear entire queue">
+                🗑️ Clear All
+              </button>
+            </div>
           </div>
+
+          <!-- Vehicle Search & Filter Toolbar -->
+          <div class="table-filter-bar">
+            <div class="filter-search-box">
+              <input type="text" id="veh-search-input" placeholder="🔍 Search Plate / Type / PID..." autocomplete="off">
+            </div>
+            <div class="filter-controls">
+              <select id="filter-junction-select">
+                <option value="">All Junctions</option>
+                <option value="1">Junction 1: Ghanta Ghar</option>
+                <option value="2">Junction 2: Ballupur Chowk</option>
+                <option value="3">Junction 3: ISBT Dehradun</option>
+                <option value="4">Junction 4: Prince Chowk</option>
+              </select>
+              <select id="filter-direction-select">
+                <option value="">All Directions</option>
+                <option value="NORTH">NORTH</option>
+                <option value="SOUTH">SOUTH</option>
+                <option value="EAST">EAST</option>
+                <option value="WEST">WEST</option>
+              </select>
+              <select id="filter-status-select">
+                <option value="">All Statuses</option>
+                <option value="WAITING">WAITING</option>
+                <option value="RUNNING">RUNNING</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
+              <label class="filter-checkbox-label">
+                <input type="checkbox" id="filter-emergency-check">
+                <span>🚨 Emergency Only</span>
+              </label>
+              <span class="veh-count-badge" id="veh-counter-pill">0 Vehicles</span>
+            </div>
+          </div>
+
           <div class="table-responsive">
             <table>
               <thead>
@@ -155,18 +255,20 @@
                   <th>Junction</th>
                   <th>Dir</th>
                   <th>Arrival</th>
+                  <th>Burst</th>
                   <th>Priority</th>
                   <th>State</th>
                   <th>Wait Time</th>
-                  <th>Action</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="vehicles-table-body">
-                <tr><td colspan="10" style="text-align: center;">Loading vehicles...</td></tr>
+                <tr><td colspan="11" style="text-align: center;">Loading vehicles...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
+
 
       </div>
 
@@ -288,19 +390,60 @@
 
   </div>
 
+  <!-- Datalist for Dehradun city landmarks -->
+  <datalist id="dehradun-locations">
+    <option value="Clock Tower (Ghanta Ghar)">
+    <option value="Rajpur Road">
+    <option value="Ballupur Chowk">
+    <option value="ISBT Dehradun">
+    <option value="Prince Chowk">
+    <option value="Chakrata Road">
+    <option value="Saharanpur Road">
+    <option value="Haridwar Bypass Road">
+    <option value="EC Road">
+    <option value="Subhash Nagar">
+  </datalist>
+
   <!-- Add Vehicle Modal -->
   <div class="modal-overlay" id="modal-add-vehicle">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Inject Vehicle into Queue</h3>
+        <div>
+          <h3>Inject Vehicle (OS Process Input)</h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Spawn a vehicle entity into the traffic scheduling queue</p>
+        </div>
         <button class="modal-close" id="btn-close-add-vehicle">&times;</button>
       </div>
       <form id="form-add-vehicle">
         <div class="modal-body">
+          <!-- Quick Presets -->
+          <div class="form-group">
+            <label style="display: flex; justify-content: space-between;">
+              <span>Quick Presets</span>
+              <span style="font-size: 0.72rem; color: var(--accent); font-weight: normal;">Click to auto-configure</span>
+            </label>
+            <div class="preset-pill-group">
+              <button type="button" class="preset-pill" data-preset="car">🚗 Car</button>
+              <button type="button" class="preset-pill" data-preset="bus">🚌 Bus</button>
+              <button type="button" class="preset-pill" data-preset="truck">🚚 Truck</button>
+              <button type="button" class="preset-pill" data-preset="bike">🏍️ Bike</button>
+              <button type="button" class="preset-pill preset-pill-emergency" data-preset="ambulance">🚑 Ambulance</button>
+              <button type="button" class="preset-pill preset-pill-emergency" data-preset="fire">🚒 Fire Truck</button>
+              <button type="button" class="preset-pill preset-pill-emergency" data-preset="police">🚓 Police</button>
+            </div>
+          </div>
+
+          <!-- License Plate Number with Randomizer -->
           <div class="form-group">
             <label for="veh-plate">License Plate Number</label>
-            <input type="text" id="veh-plate" placeholder="e.g. UK07-AB-5555" required>
+            <div class="input-with-button">
+              <input type="text" id="veh-plate" placeholder="e.g. UK07-AB-5555" required autocomplete="off">
+              <button type="button" class="btn btn-outline" id="btn-random-plate" style="white-space: nowrap; padding: 0.45rem 0.75rem;" title="Generate random UK07 plate">
+                🎲 Auto Plate
+              </button>
+            </div>
           </div>
+
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
             <div class="form-group">
               <label for="veh-type">Vehicle Type</label>
@@ -324,6 +467,7 @@
               </select>
             </div>
           </div>
+
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
             <div class="form-group">
               <label for="veh-direction">Approach Direction</label>
@@ -339,27 +483,160 @@
               <input type="number" id="veh-arrival" min="0" value="0">
             </div>
           </div>
+
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
             <div class="form-group">
               <label for="veh-burst">Burst / Service Time (s)</label>
               <input type="number" id="veh-burst" min="1" max="30" value="3">
+              <span style="font-size: 0.7rem; color: var(--text-muted);">Required green time to clear junction</span>
             </div>
             <div class="form-group">
-              <label for="veh-priority">Initial Priority (1=Highest)</label>
+              <label for="veh-priority">Priority (1=Highest, 10=Lowest)</label>
               <input type="number" id="veh-priority" min="1" max="10" value="3">
+              <span style="font-size: 0.7rem; color: var(--text-muted);">OS Priority Scheduling weight</span>
             </div>
           </div>
-          <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 4px;">
-            <input type="checkbox" id="veh-emergency" style="width: auto;">
-            <label for="veh-emergency" style="cursor: pointer; color: var(--signal-red);">Mark as Emergency Vehicle (Force Priority 1)</label>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="veh-source">Origin / Source</label>
+              <input type="text" id="veh-source" list="dehradun-locations" placeholder="Origin road / zone" value="Rajpur Road">
+            </div>
+            <div class="form-group">
+              <label for="veh-destination">Destination</label>
+              <input type="text" id="veh-destination" list="dehradun-locations" placeholder="Destination road / zone" value="Clock Tower">
+            </div>
+          </div>
+
+          <div class="emergency-toggle-box" id="emergency-toggle-wrapper">
+            <input type="checkbox" id="veh-emergency" style="width: 18px; height: 18px; cursor: pointer;">
+            <label for="veh-emergency" style="cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--signal-red);">
+              🚨 Mark as Emergency Vehicle (Force Priority 1 & Instant Signal Preemption)
+            </label>
           </div>
         </div>
         <div class="modal-footer">
-          <button type="submit" class="btn btn-primary">Create Vehicle</button>
+          <button type="button" class="btn btn-outline" id="btn-cancel-add-vehicle">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-add-vehicle">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Inject Vehicle
+          </button>
         </div>
       </form>
     </div>
   </div>
+
+  <!-- Edit Vehicle Modal -->
+  <div class="modal-overlay" id="modal-edit-vehicle">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3>Modify Vehicle Parameters</h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted);">Adjust dynamic scheduling parameters</p>
+        </div>
+        <button class="modal-close" id="btn-close-edit-vehicle">&times;</button>
+      </div>
+      <form id="form-edit-vehicle">
+        <input type="hidden" id="edit-veh-id">
+        <div class="modal-body">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label>Vehicle ID</label>
+              <input type="text" id="edit-veh-id-display" disabled style="background: #f1f5f9; font-weight: bold;">
+            </div>
+            <div class="form-group">
+              <label>Plate Number</label>
+              <input type="text" id="edit-veh-plate" disabled style="background: #f1f5f9; font-weight: bold;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+              <label for="edit-veh-priority">Priority (1=Highest)</label>
+              <input type="number" id="edit-veh-priority" min="1" max="10" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-veh-burst">Burst Time (s)</label>
+              <input type="number" id="edit-veh-burst" min="1" max="60" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-veh-status">Process Status</label>
+            <select id="edit-veh-status">
+              <option value="WAITING">WAITING (In Queue)</option>
+              <option value="RUNNING">RUNNING (Crossing Critical Section)</option>
+              <option value="COMPLETED">COMPLETED (Departed)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-edit-vehicle">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Batch Spawn Vehicles Modal -->
+  <div class="modal-overlay" id="modal-batch-vehicles">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3>🎲 Batch Inject Vehicles</h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted);">Generate and inject high-density traffic flow</p>
+        </div>
+        <button class="modal-close" id="btn-close-batch-modal">&times;</button>
+      </div>
+      <form id="form-batch-vehicles">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="batch-count">Vehicle Quantity</label>
+            <select id="batch-count">
+              <option value="3">3 Vehicles (Small Inflow)</option>
+              <option value="5" selected>5 Vehicles (Standard Flow)</option>
+              <option value="10">10 Vehicles (High Congestion)</option>
+              <option value="20">20 Vehicles (Stress Test / Surge)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="batch-junction">Destination Junction</label>
+            <select id="batch-junction">
+              <option value="RANDOM" selected>Randomized Across All Junctions</option>
+              <option value="1">Junction 1: Ghanta Ghar</option>
+              <option value="2">Junction 2: Ballupur Chowk</option>
+              <option value="3">Junction 3: ISBT Dehradun</option>
+              <option value="4">Junction 4: Prince Chowk</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="batch-type-mix">Vehicle Distribution Mix</label>
+            <select id="batch-type-mix">
+              <option value="MIXED" selected>Realistic Urban Mix (Cars, Buses, Bikes, Trucks)</option>
+              <option value="CARS_ONLY">Passenger Cars Only</option>
+              <option value="HEAVY">Heavy Vehicles (Buses & Trucks)</option>
+              <option value="EMERGENCY_SURGE">Corridor with Guaranteed Emergency Units</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 4px;">
+            <input type="checkbox" id="batch-include-emergency" checked style="width: auto;">
+            <label for="batch-include-emergency" style="cursor: pointer; font-size: 0.85rem;">Include 1 Emergency Vehicle (Priority 1) in batch</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-batch-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-batch">Spawn Batch</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
 
   <!-- Report Incident Modal -->
   <div class="modal-overlay" id="modal-add-incident">

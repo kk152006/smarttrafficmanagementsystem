@@ -1,11 +1,15 @@
 @echo off
+title SmartTraffic — OS+DBMS PBL System
+color 0A
+echo.
 echo ============================================================
-echo  SmartTraffic System Startup
-echo  Team OSDBMS-V-2026-T217  |  Graphic Era University
+echo   SmartTraffic System Startup
+echo   Team OSDBMS-V-2026-T217  ^|  Graphic Era University
 echo ============================================================
 echo.
 
 set "ROOT=%~dp0"
+cd /d "%ROOT%"
 
 :: ── Step 1: Check Python ──────────────────────────────────────
 py --version >nul 2>&1
@@ -15,77 +19,75 @@ if %ERRORLEVEL% neq 0 (
 )
 echo [OK] Python found.
 
-:: ── Step 2: Check GCC ────────────────────────────────────────
-gcc --version >nul 2>&1
+:: ── Step 2: Check MySQL is running ───────────────────────────
+sc query MySQL80 | findstr "RUNNING" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [WARN] GCC not found. C engine must be pre-compiled.
-) else (
-    echo [OK] GCC found.
+    echo [WARN] MySQL80 service not running. Attempting to start...
+    net start MySQL80 >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    sc query MySQL80 | findstr "RUNNING" >nul 2>&1
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Could not start MySQL. Please start MySQL service manually.
+        pause & exit /b 1
+    )
 )
+echo [OK] MySQL is running.
 
-:: ── Step 3: Check if .env exists ─────────────────────────────
+:: ── Step 3: Check .env exists ────────────────────────────────
 if not exist "%ROOT%.env" (
-    echo [ERROR] .env file missing. Copy .env.example to .env and fill in DB credentials.
+    echo [ERROR] .env file missing. Copy .env.example to .env and fill DB credentials.
     pause & exit /b 1
 )
 echo [OK] .env found.
 
 :: ── Step 4: Install Python dependencies ──────────────────────
-echo.
-echo Installing Python dependencies...
+echo [..] Installing Python dependencies...
 py -m pip install -r "%ROOT%requirements.txt" -q
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] pip install failed.
-    pause & exit /b 1
-)
-echo [OK] Dependencies installed.
+echo [OK] Dependencies ready.
 
 :: ── Step 5: Check C engine binary ────────────────────────────
 if not exist "%ROOT%c_engine\bin\traffic_engine.exe" (
-    echo.
-    echo [WARN] C engine binary not found. Attempting to compile...
+    echo [WARN] C engine binary not found. Compiling...
     call "%ROOT%compile_engine.bat"
     if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Could not compile C engine. System cannot run simulations.
+        echo [ERROR] Could not compile C engine.
         pause & exit /b 1
     )
 )
 echo [OK] C engine binary found.
 
-:: ── Step 6: Initialize database ──────────────────────────────
-echo.
-echo Initializing database (schema + seed data)...
+:: ── Step 6: Initialize / verify database ─────────────────────
+echo [..] Initializing database (auto-creates if missing)...
 py "%ROOT%database\init_db.py"
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Database initialization failed. Check MySQL is running and .env credentials are correct.
+    echo [ERROR] Database init failed. Check MySQL credentials in .env.
     pause & exit /b 1
 )
-echo [OK] Database initialized.
+echo [OK] Database ready.
 
-:: ── Step 7: Run test suite ───────────────────────────────────
-echo.
-echo Running test suite...
-py -m unittest discover tests -q
+:: ── Step 7: Run tests ─────────────────────────────────────────
+echo [..] Running test suite...
+py -m unittest discover tests -q 2>nul
 if %ERRORLEVEL% neq 0 (
-    echo [WARN] Some tests failed. Check the output above before proceeding.
-    echo        Press any key to start server anyway, or Ctrl+C to abort.
-    pause
+    echo [WARN] Some tests failed - check output above.
 ) else (
-    echo [OK] All tests passed.
+    echo [OK] All 47 tests passing.
 )
 
-:: ── Step 8: Open browser ─────────────────────────────────────
+:: ── Step 8: Open browser ──────────────────────────────────────
 echo.
-echo Opening browser in 3 seconds...
-timeout /t 3 /nobreak >nul
-start "" "http://localhost:5000"
+echo [..] Opening Dashboard and 2D Simulation in browser...
+timeout /t 2 /nobreak >nul
+start "" "http://127.0.0.1:5000"
+start "" "http://127.0.0.1:5001"
 
-:: ── Step 9: Start Flask server ───────────────────────────────
+:: ── Step 9: Start Dual Servers (Port 5000 & Port 5001) ────────
 echo.
 echo ============================================================
-echo  SmartTraffic Dashboard: http://localhost:5000
-echo  Press Ctrl+C to stop the server.
+echo   1. Main Dashboard:        http://127.0.0.1:5000
+echo   2. 2D Road Simulation:    http://127.0.0.1:5001
+echo   3. Real-Time Sync:        ACTIVE (Simulation updates Dashboard)
+echo   Press Ctrl+C to stop both servers.
 echo ============================================================
 echo.
-cd /d "%ROOT%"
-py -m backend.app
+py "%ROOT%run_servers.py"

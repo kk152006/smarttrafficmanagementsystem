@@ -1,0 +1,358 @@
+/* ============================================================================
+   SmartTraffic Road Simulation — Standalone Page Styles
+   ============================================================================ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0f172a;
+  --bg-panel: #1e293b;
+  --bg-panel-hover: #273548;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --accent: #3b82f6;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --orange: #f97316;
+  --road: #475569;
+  --road-line: #fbbf24;
+  --road-edge: #64748b;
+  --junction-fill: #1e3a8a;
+  --radius: 8px;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.sim-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1.2rem;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-bottom: 1px solid var(--border);
+  min-height: 52px;
+  flex-shrink: 0;
+}
+
+.sim-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.sim-logo {
+  font-size: 1.6rem;
+  filter: drop-shadow(0 0 8px rgba(59,130,246,0.5));
+}
+
+.sim-header-left h1 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.3px;
+}
+
+.sim-header-left p {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.sim-header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  transition: all 0.15s;
+}
+.header-link:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.sim-clock {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(34,197,94,0.4);
+}
+
+/* ── Layout ─────────────────────────────────────────── */
+.sim-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Sidebar ────────────────────────────────────────── */
+.sim-sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+}
+
+.panel h3 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel-hint {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-bottom: 0.4rem;
+}
+
+.panel select,
+.panel input[type="number"] {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.82rem;
+  outline: none;
+  margin-bottom: 0.3rem;
+}
+.panel select:focus,
+.panel input:focus {
+  border-color: var(--accent);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.field-row label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.field-row input {
+  width: 60px !important;
+  flex-shrink: 0;
+}
+
+/* Speed Buttons */
+.speed-btns {
+  display: flex;
+  gap: 4px;
+}
+.speed-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.speed-btn:hover { border-color: var(--accent); color: var(--text); }
+.speed-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* Playback */
+.playback-btns {
+  display: flex;
+  gap: 6px;
+}
+.ctrl-btn {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--border);
+  color: var(--text);
+}
+.ctrl-btn:hover { background: #475569; }
+.ctrl-btn.play { background: var(--green); color: #0f172a; }
+.ctrl-btn.play:hover { background: #16a34a; }
+.ctrl-btn.play.paused { background: var(--orange); }
+
+/* Spawn Grid */
+.spawn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.spawn-btn {
+  padding: 5px 2px;
+  font-size: 0.73rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.spawn-btn:hover { border-color: var(--accent); background: var(--bg-panel-hover); }
+.spawn-btn.ambulance,
+.spawn-btn.fire,
+.spawn-btn.police { border-color: #7f1d1d; }
+.spawn-btn.ambulance:hover,
+.spawn-btn.fire:hover,
+.spawn-btn.police:hover { background: #450a0a; border-color: var(--red); }
+
+/* Stats */
+.stats-panel .stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 0.78rem;
+}
+.stats-panel .stat-row span { color: var(--text-dim); }
+.stats-panel .stat-row b { font-weight: 700; }
+.stats-panel .stat-row b.green { color: var(--green); }
+.stats-panel .stat-row b.red { color: var(--red); }
+.stats-panel .stat-row b.blue { color: var(--accent); }
+.stats-panel .stat-row b.orange { color: var(--orange); }
+.stats-panel hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+/* Junction Signal Controls */
+.junc-ctrl {
+  margin-bottom: 6px;
+  padding: 5px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.junc-ctrl-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.junc-ctrl-btns {
+  display: flex;
+  gap: 3px;
+}
+.junc-dir-btn {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: center;
+}
+.junc-dir-btn.is-red { background: #450a0a; color: #fca5a5; border-color: #7f1d1d; }
+.junc-dir-btn.is-green { background: #052e16; color: #86efac; border-color: #166534; }
+.junc-dir-btn:hover { opacity: 0.85; transform: scale(1.04); }
+
+/* ── Canvas Area ───────────────────────────────────── */
+.sim-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #0c1322;
+}
+
+#sim-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Floating Junction Labels */
+.junction-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.junc-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  text-align: center;
+}
+
+.junc-label-name {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: white;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.8), 0 0 20px rgba(59,130,246,0.3);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.junc-label-sub {
+  font-size: 0.58rem;
+  color: #94a3b8;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  margin-top: 1px;
+}
+
+/* Scrollbar */
+.sim-sidebar::-webkit-scrollbar { width: 5px; }
+.sim-sidebar::-webkit-scrollbar-track { background: transparent; }
+.sim-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@media (max-width: 900px) {
+  .sim-layout { flex-direction: column; }
+  .sim-sidebar { width: 100%; min-width: unset; flex-direction: row; flex-wrap: wrap; max-height: 180px; }
+  .sim-canvas-wrap { min-height: 400px; }
+}

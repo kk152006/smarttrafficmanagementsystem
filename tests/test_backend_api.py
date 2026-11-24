@@ -68,7 +68,28 @@ class TestBackendAPI(unittest.TestCase):
         res_del = self.client.delete(f'/api/vehicles/{v_id}')
         self.assertEqual(res_del.status_code, 200)
 
+    def test_vehicles_batch_and_clear(self):
+        # 1. Batch Create
+        batch_payload = {
+            "simulation_id": 1,
+            "vehicles": [
+                {"vehicle_type": "Car", "junction_id": 1, "direction": "NORTH", "burst_time": 3, "priority": 3},
+                {"vehicle_type": "Ambulance", "junction_id": 2, "direction": "SOUTH", "burst_time": 2, "priority": 1, "is_emergency": 1},
+                {"vehicle_type": "Bus", "junction_id": 3, "direction": "EAST", "burst_time": 5, "priority": 2}
+            ]
+        }
+        res_batch = self.client.post('/api/vehicles/batch', json=batch_payload)
+        self.assertEqual(res_batch.status_code, 201)
+        data = res_batch.get_json()
+        self.assertEqual(data.get('status'), 'SUCCESS')
+        self.assertEqual(data.get('count'), 3)
+
+        # 2. Clear vehicles by status
+        res_clear_comp = self.client.delete('/api/vehicles/clear?simulation_id=1&status=COMPLETED')
+        self.assertEqual(res_clear_comp.status_code, 200)
+
     def test_manual_signal_control(self):
+
         # Apply manual override: Set EAST to GREEN
         payload = {
             "junction_id": 1,
