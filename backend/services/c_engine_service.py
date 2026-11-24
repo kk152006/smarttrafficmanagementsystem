@@ -26,7 +26,7 @@ class CEngineService:
             raise ValueError("Payload must be a dictionary")
         if not isinstance(payload.get('vehicles'), list):
             raise ValueError("Vehicles must be a list")
-        if payload.get('algorithm') not in ['FCFS', 'PRIORITY', 'ROUND_ROBIN', 'ADAPTIVE']:
+        if payload.get('algorithm') not in ['FCFS', 'PRIORITY', 'ROUND_ROBIN', 'ADAPTIVE', 'EDF']:
             raise ValueError(f"Invalid algorithm: {payload.get('algorithm')}")
 
         exe = cls.get_engine_path()

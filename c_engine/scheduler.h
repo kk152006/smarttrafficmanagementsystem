@@ -31,7 +31,8 @@ typedef enum {
     ALG_FCFS = 0,
     ALG_PRIORITY = 1,
     ALG_ROUND_ROBIN = 2,
-    ALG_ADAPTIVE = 3
+    ALG_ADAPTIVE = 3,
+    ALG_EDF = 4
 } SchedulingAlgorithm;
 
 typedef enum {
@@ -87,6 +88,20 @@ typedef struct {
 } ScheduleEvent;
 
 typedef struct {
+    int task_id;
+    int junction_id;
+    char name[64];
+    int release_time;         /* Task arrival / release time */
+    int execution_req;        /* Computational execution requirement */
+    int remaining_time;
+    int deadline;             /* Relative or absolute deadline */
+    int completion_time;
+    int response_time;
+    int priority;
+    int missed_deadline;      /* 1 if missed, 0 if met */
+} EdgeTask;
+
+typedef struct {
     double avg_waiting_time;
     double avg_turnaround_time;
     double throughput;     /* vehicles / unit time */
@@ -94,6 +109,9 @@ typedef struct {
     int completed_vehicles;
     int emergency_vehicles;
     double avg_emergency_wait;
+    int missed_deadlines;
+    double avg_response_time;
+    double cpu_utilization;
 } PerformanceMetrics;
 
 typedef struct {
@@ -105,6 +123,10 @@ typedef struct {
     int quantum;
     int aging_threshold;   /* Ticks of waiting before priority decrements by 1 (ages) */
     
+    /* CATS-R Edge Real-Time Tasks */
+    EdgeTask tasks[MAX_JUNCTIONS * 4];
+    int task_count;
+
     /* Output results */
     Vehicle scheduled_vehicles[MAX_VEHICLES];
     int execution_order[MAX_VEHICLES * 10];
@@ -135,6 +157,7 @@ void runFCFS(TrafficSimulation *sim);
 void runPriority(TrafficSimulation *sim, int enable_aging);
 void runRoundRobin(TrafficSimulation *sim);
 void runAdaptive(TrafficSimulation *sim);
+void runEDF(TrafficSimulation *sim);
 
 void computePerformanceMetrics(TrafficSimulation *sim);
 void logScheduleEvent(TrafficSimulation *sim, int time_tick, int v_id, int j_id, Direction dir, const char *action, const char *details);

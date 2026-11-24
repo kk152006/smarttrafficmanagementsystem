@@ -312,6 +312,9 @@ void executeAlgorithmByName(const char *name, TrafficSimulation *sim) {
     } else if (strcmp(name, "ROUND_ROBIN") == 0) {
         sim->algorithm = ALG_ROUND_ROBIN;
         runRoundRobin(sim);
+    } else if (strcmp(name, "EDF") == 0) {
+        sim->algorithm = ALG_EDF;
+        runEDF(sim);
     } else {
         sim->algorithm = ALG_ADAPTIVE;
         runAdaptive(sim);
@@ -423,6 +426,7 @@ int runFileMode(const char* in_file, const char* out_file) {
         case ALG_PRIORITY:    runPriority(&sim, 1); break;
         case ALG_ROUND_ROBIN: runRoundRobin(&sim); break;
         case ALG_ADAPTIVE:    runAdaptive(&sim); break;
+        case ALG_EDF:         runEDF(&sim); break;
         default:              runAdaptive(&sim); break;
     }
 
@@ -460,6 +464,7 @@ int runStdinMode(void) {
         case ALG_PRIORITY:    runPriority(&sim, 1); break;
         case ALG_ROUND_ROBIN: runRoundRobin(&sim); break;
         case ALG_ADAPTIVE:    runAdaptive(&sim); break;
+        case ALG_EDF:         runEDF(&sim); break;
         default:              runAdaptive(&sim); break;
     }
 

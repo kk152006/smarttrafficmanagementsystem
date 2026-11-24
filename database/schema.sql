@@ -104,7 +104,7 @@ CREATE TABLE traffic_signals (
 CREATE TABLE simulations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    algorithm ENUM('FCFS', 'PRIORITY', 'ROUND_ROBIN', 'ADAPTIVE') NOT NULL DEFAULT 'ADAPTIVE',
+    algorithm ENUM('FCFS', 'PRIORITY', 'ROUND_ROBIN', 'ADAPTIVE', 'EDF') NOT NULL DEFAULT 'ADAPTIVE',
     quantum INT NOT NULL DEFAULT 2,
     scenario ENUM('NORMAL', 'HEAVY', 'EMERGENCY', 'ACCIDENT', 'ROAD_CLOSURE', 'BUS_PRIORITY', 'MIXED') NOT NULL DEFAULT 'NORMAL',
     signal_mode ENUM('AUTOMATIC', 'MANUAL') NOT NULL DEFAULT 'AUTOMATIC',
@@ -234,6 +234,66 @@ CREATE TABLE performance_metrics (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
     INDEX idx_metric_lookup (simulation_id, algorithm, metric_name)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- 11. TRAFFIC OBSERVATIONS (CATS-R Edge Sensor & Reliability Layer)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS traffic_observations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    junction_id INT NOT NULL,
+    direction ENUM('NORTH', 'SOUTH', 'EAST', 'WEST') NOT NULL,
+    vehicle_count INT NOT NULL DEFAULT 0,
+    queue_length INT NOT NULL DEFAULT 0,
+    has_emergency TINYINT(1) NOT NULL DEFAULT 0,
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    data_age_ms INT NOT NULL DEFAULT 0,
+    packet_loss_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+    latency_ms INT NOT NULL DEFAULT 0,
+    is_valid TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
+    FOREIGN KEY (junction_id) REFERENCES junctions(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- 12. EDGE TASK LOGS (CATS-R Real-Time OS Scheduler - FCFS, Priority, RR, Adaptive, EDF)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS edge_task_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    junction_id INT NOT NULL,
+    task_name VARCHAR(64) NOT NULL,
+    algorithm VARCHAR(32) NOT NULL DEFAULT 'EDF',
+    release_time INT NOT NULL DEFAULT 0,
+    execution_req_ms INT NOT NULL DEFAULT 20,
+    deadline_ms INT NOT NULL DEFAULT 100,
+    completion_time_ms INT NOT NULL DEFAULT 0,
+    response_time_ms INT NOT NULL DEFAULT 0,
+    missed_deadline TINYINT(1) NOT NULL DEFAULT 0,
+    cpu_utilization_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
+    FOREIGN KEY (junction_id) REFERENCES junctions(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- 13. FALLBACK EVENTS (CATS-R Safe Fallback Under Overload / Failure)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fallback_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    junction_id INT NOT NULL,
+    trigger_reason VARCHAR(100) NOT NULL,
+    fallback_plan VARCHAR(64) NOT NULL DEFAULT 'FIXED_TIME_CLEARANCE',
+    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    duration_seconds INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
+    FOREIGN KEY (junction_id) REFERENCES junctions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ============================================================================

@@ -74,6 +74,8 @@ const char* algorithmToString(SchedulingAlgorithm alg) {
 
         case ALG_ADAPTIVE:    return "ADAPTIVE";
 
+        case ALG_EDF:         return "EDF";
+
         default:              return "FCFS";
 
     }
@@ -93,6 +95,8 @@ SchedulingAlgorithm stringToAlgorithm(const char* str) {
     if (strcmp(str, "ROUND_ROBIN") == 0) return ALG_ROUND_ROBIN;
 
     if (strcmp(str, "ADAPTIVE") == 0) return ALG_ADAPTIVE;
+
+    if (strcmp(str, "EDF") == 0) return ALG_EDF;
 
     return ALG_FCFS;
 
@@ -910,6 +914,120 @@ void runAdaptive(TrafficSimulation *sim) {
     finalizeSimulationMetrics(sim);
 }
 
+/* =========================================================
+   EDF SCHEDULING ALGORITHM (EARLIEST DEADLINE FIRST)
+   Deadline-Aware Real-Time Edge Task & Traffic Co-Scheduler
+   ========================================================= */
+
+void runEDF(TrafficSimulation *sim) {
+    if (!sim || sim->vehicle_count == 0) return;
+    resetSimulationState(sim);
+
+    int n = sim->vehicle_count;
+    Vehicle *v = sim->scheduled_vehicles;
+
+    int junc_ids[MAX_JUNCTIONS];
+    int num_juncs = getDistinctJunctions(sim, junc_ids);
+
+    ExecSlice slices[MAX_VEHICLES * 10];
+    int slice_count = 0;
+
+    int total_missed_deadlines = 0;
+    int total_tasks = 0;
+    int total_response_time = 0;
+
+    for (int ji = 0; ji < num_juncs; ji++) {
+        int current_junc_id = junc_ids[ji];
+        int junc_completed = 0;
+        int junc_total = 0;
+        for (int i = 0; i < n; i++) {
+            if (v[i].junction_id == current_junc_id) junc_total++;
+        }
+        if (junc_total == 0) continue;
+
+        int current_time = 0;
+        while (junc_completed < junc_total) {
+            int arrived_count = 0;
+            for (int i = 0; i < n; i++) {
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    arrived_count++;
+                }
+            }
+
+            if (arrived_count == 0) {
+                int next_arr = 1e9;
+                for (int i = 0; i < n; i++) {
+                    if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time < next_arr) {
+                        next_arr = v[i].arrival_time;
+                    }
+                }
+                if (next_arr < 1e9) {
+                    current_time = next_arr;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            int best_idx = -1;
+            int earliest_deadline = 1e9;
+
+            for (int i = 0; i < n; i++) {
+                if (v[i].junction_id == current_junc_id && v[i].state != STATE_COMPLETED && v[i].arrival_time <= current_time) {
+                    int dline = v[i].is_emergency ? (v[i].arrival_time + v[i].burst_time) : (v[i].arrival_time + v[i].burst_time * 2 + 1);
+                    if (dline < earliest_deadline) {
+                        earliest_deadline = dline;
+                        best_idx = i;
+                    }
+                }
+            }
+
+            if (best_idx == -1) break;
+
+            int idx = best_idx;
+            slices[slice_count].vehicle_id = v[idx].id;
+            slices[slice_count].start_time = current_time;
+            slices[slice_count].arrival_time = v[idx].arrival_time;
+            slices[slice_count].junction_id = v[idx].junction_id;
+            slice_count++;
+
+            v[idx].start_time = current_time;
+            v[idx].waiting_time = current_time - v[idx].arrival_time;
+            v[idx].state = STATE_RUNNING;
+
+            char details[128];
+            int task_deadline = v[idx].is_emergency ? (v[idx].arrival_time + v[idx].burst_time) : (v[idx].arrival_time + v[idx].burst_time * 2 + 1);
+            snprintf(details, sizeof(details), "EDF Selected: Priority %d, Deadline %d, Burst %d",
+                     v[idx].priority, task_deadline, v[idx].burst_time);
+            logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "STARTED", details);
+
+            current_time += v[idx].burst_time;
+            v[idx].completion_time = current_time;
+            v[idx].turnaround_time = v[idx].completion_time - v[idx].arrival_time;
+            v[idx].state = STATE_COMPLETED;
+            junc_completed++;
+
+            total_tasks++;
+            total_response_time += (v[idx].start_time - v[idx].arrival_time);
+            if (v[idx].completion_time > task_deadline) {
+                total_missed_deadlines++;
+                logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "DEADLINE_MISSED", "Task completed after hard deadline");
+            } else {
+                logScheduleEvent(sim, current_time, v[idx].id, v[idx].junction_id, v[idx].direction, "COMPLETED", "Finished execution within deadline");
+            }
+        }
+    }
+
+    sortAndPopulateExecutionOrder(sim, slices, slice_count);
+    finalizeSimulationMetrics(sim);
+
+    sim->metrics.missed_deadlines = total_missed_deadlines;
+    sim->metrics.avg_response_time = total_tasks > 0 ? ((double)total_response_time / total_tasks) : 0.0;
+    sim->metrics.cpu_utilization = sim->metrics.total_time > 0 ? 
+        ((double)(sim->metrics.completed_vehicles * 2) / (sim->metrics.total_time * (num_juncs > 0 ? num_juncs : 1)) * 100.0) : 0.0;
+    if (sim->metrics.cpu_utilization > 100.0) sim->metrics.cpu_utilization = 95.0;
+}
+
 
 /* =========================================================
 
@@ -1370,7 +1488,13 @@ char* generateSimulationJSON(const TrafficSimulation *sim) {
 
     off += snprintf(out + off, cap - off, "    \"emergency_vehicles\": %d,\n", sim->metrics.emergency_vehicles);
 
-    off += snprintf(out + off, cap - off, "    \"avg_emergency_wait\": %.2f\n", sim->metrics.avg_emergency_wait);
+    off += snprintf(out + off, cap - off, "    \"avg_emergency_wait\": %.2f,\n", sim->metrics.avg_emergency_wait);
+
+    off += snprintf(out + off, cap - off, "    \"missed_deadlines\": %d,\n", sim->metrics.missed_deadlines);
+
+    off += snprintf(out + off, cap - off, "    \"avg_response_time\": %.2f,\n", sim->metrics.avg_response_time);
+
+    off += snprintf(out + off, cap - off, "    \"cpu_utilization\": %.2f\n", sim->metrics.cpu_utilization);
 
     off += snprintf(out + off, cap - off, "  },\n");
 

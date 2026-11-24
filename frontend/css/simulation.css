@@ -356,3 +356,31 @@ body {
   .sim-sidebar { width: 100%; min-width: unset; flex-direction: row; flex-wrap: wrap; max-height: 180px; }
   .sim-canvas-wrap { min-height: 400px; }
 }
+
+/* ── CATS-R Resilience Styling ───────────────────────── */
+.resilience-row {
+  margin-bottom: 6px;
+}
+.resilience-row label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.73rem;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.resilience-row span {
+  font-weight: 700;
+  color: var(--accent);
+}
+.fallback-status-box.active {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: #ef4444 !important;
+  animation: pulseFallback 1s infinite alternate;
+}
+.fallback-status-box.active .fallback-indicator {
+  color: #fca5a5 !important;
+}
+@keyframes pulseFallback {
+  from { box-shadow: 0 0 4px rgba(239,68,68,0.3); }
+  to { box-shadow: 0 0 14px rgba(239,68,68,0.7); }
+}

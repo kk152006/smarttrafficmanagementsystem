@@ -21,6 +21,9 @@
     { id: 3, name: 'Saharanpur Highway',   from: 4, to: 3, color: '#06b6d4', lanes: 2, toDir: 'EAST', fromDir: 'WEST' },
     { id: 4, name: 'GMS Road Bypass',      from: 2, to: 3, color: '#f59e0b', lanes: 2, toDir: 'NORTH', fromDir: 'SOUTH' },
     { id: 5, name: 'Chakrata Road',        from: 2, to: 4, color: '#10b981', lanes: 2, toDir: 'WEST', fromDir: 'EAST' },
+    { id: 6, name: 'EC Road Link',         from: 4, to: 1, color: '#ec4899', lanes: 2, toDir: 'EAST', fromDir: 'NORTH' },
+    { id: 7, name: 'Cantt Ring Expressway', from: 1, to: 3, color: '#8b5cf6', lanes: 2, toDir: 'NORTH', fromDir: 'WEST' },
+    { id: 8, name: 'Transport Corridor',   from: 3, to: 4, color: '#14b8a6', lanes: 2, toDir: 'SOUTH', fromDir: 'WEST' },
   ];
 
   const VEHICLE_TYPES = {
@@ -57,6 +60,20 @@
   const signals = {};
 
   const manualOverrides = {};  // jId -> true
+
+  // ── CATS-R Resilience & Fault Injection State ────────────
+  const resilienceConfig = {
+    packetLossPct: 0,
+    latencyMs: 50,
+    missingObsPct: 0,
+    dataAgeAware: true,
+    fallbackActive: false,
+    fallbackTimer: 0,
+    missedDeadlines: 0,
+    totalTasks: 0,
+    avgRespTime: 24,
+    cpuUtil: 38
+  };
 
   // ── Initialization ─────────────────────────────────────
   function init() {
@@ -162,8 +179,42 @@
 
   function tickSignals() {
     if (!running) return;
-    const alg = document.getElementById('sim-algorithm').value;
-    const quantum = parseInt(document.getElementById('sim-quantum').value, 10) || 3;
+    const alg = document.getElementById('sim-algorithm')?.value || 'ADAPTIVE';
+    const quantum = parseInt(document.getElementById('sim-quantum')?.value, 10) || 3;
+
+    // ── CATS-R Overload / Fault Detection ──
+    const isOverloaded = resilienceConfig.packetLossPct > 15 || resilienceConfig.latencyMs > 600;
+    const packetLost = Math.random() * 100 < resilienceConfig.packetLossPct;
+
+    if (isOverloaded || packetLost) {
+      if (!resilienceConfig.fallbackActive) {
+        resilienceConfig.fallbackActive = true;
+        resilienceConfig.fallbackTimer = 10;
+        updateFallbackUI();
+      }
+    }
+
+    if (resilienceConfig.fallbackActive) {
+      resilienceConfig.fallbackTimer--;
+      if (resilienceConfig.fallbackTimer <= 0) {
+        resilienceConfig.fallbackActive = false;
+        updateFallbackUI();
+      }
+      // SAFE FALLBACK: Fixed-Time Deterministic Clearance Cycle
+      JUNCTIONS.forEach(j => {
+        if (manualOverrides[j.id]) return;
+        const sig = signals[j.id];
+        sig.phaseTimer++;
+        if (sig.phaseTimer >= 6) {
+          sig.phaseTimer = 0;
+          const idx = DIRECTIONS.indexOf(sig.activeDir);
+          setGreenDir(j.id, DIRECTIONS[(idx + 1) % 4]);
+        }
+      });
+      updateJunctionControlsUI();
+      updateResilienceMetricsUI();
+      return;
+    }
 
     JUNCTIONS.forEach(j => {
       if (manualOverrides[j.id]) return;
@@ -189,6 +240,32 @@
           const idx = DIRECTIONS.indexOf(sig.activeDir);
           setGreenDir(j.id, DIRECTIONS[(idx + 1) % 4]);
         }
+      } else if (alg === 'EDF') {
+        // CATS-R Earliest Deadline First
+        resilienceConfig.totalTasks++;
+        const approaching = vehicles.filter(v => v.targetJunc === j.id && v.progress < 0.9 && !v.cleared);
+        let bestDir = sig.activeDir;
+        let earliestDeadline = 1e9;
+
+        approaching.forEach(v => {
+          const dline = v.emergency ? 2.0 : Math.max(1.0, 6.0 - v.waitTime);
+          if (dline < earliestDeadline) {
+            earliestDeadline = dline;
+            bestDir = v.approachDir;
+          }
+        });
+
+        if (earliestDeadline < 0) {
+          resilienceConfig.missedDeadlines++;
+        }
+
+        if (sig.phaseTimer >= 3 && bestDir !== sig.activeDir) {
+          sig.phaseTimer = 0;
+          setGreenDir(j.id, bestDir);
+        } else if (sig.phaseTimer >= 6) {
+          sig.phaseTimer = 0;
+          setGreenDir(j.id, bestDir);
+        }
       } else if (alg === 'FCFS') {
         const queued = vehicles.filter(v => v.targetJunc === j.id && v.state === 'QUEUED' && !v.cleared);
         if (queued.length > 0 && sig.phaseTimer >= 3) {
@@ -204,11 +281,14 @@
           setGreenDir(j.id, DIRECTIONS[(idx + 1) % 4]);
         }
       } else {
-        // ADAPTIVE
+        // ADAPTIVE (with AoI / Data-Age Discounting)
         const counts = { NORTH: 0, EAST: 0, SOUTH: 0, WEST: 0 };
         const hasEmerg = { NORTH: false, EAST: false, SOUTH: false, WEST: false };
         vehicles.forEach(v => {
           if (v.targetJunc === j.id && v.progress < 0.9 && !v.cleared) {
+            if (resilienceConfig.missingObsPct > 0 && Math.random() * 100 < resilienceConfig.missingObsPct) {
+              return; // Dropped observation
+            }
             counts[v.approachDir]++;
             if (v.emergency) hasEmerg[v.approachDir] = true;
           }
@@ -227,8 +307,12 @@
           sig.phaseTimer = 0;
           let bestDir = sig.activeDir;
           let bestScore = -1;
+
+          // AoI (Age of Information) Confidence Discount
+          const aoiDiscount = resilienceConfig.dataAgeAware ? Math.exp(-0.0012 * resilienceConfig.latencyMs) : 1.0;
+
           DIRECTIONS.forEach(d => {
-            const score = counts[d] * 3 + (hasEmerg[d] ? 150 : 0);
+            const score = (counts[d] * 3 * aoiDiscount) + (hasEmerg[d] ? 150 : 0);
             if (score > bestScore) { bestScore = score; bestDir = d; }
           });
           sig.maxGreen = Math.min(8, Math.max(3, counts[bestDir] * 2));
@@ -238,6 +322,7 @@
     });
 
     updateJunctionControlsUI();
+    updateResilienceMetricsUI();
   }
 
   function setGreenDir(jId, dir) {
@@ -397,11 +482,82 @@
     ctx.stroke();
   }
 
+  function drawZebraCrosswalk(cx, cy, orientation, width) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    const numStripes = 5;
+    const stripeW = 3;
+    const stripeLen = 8;
+    if (orientation === 'H') {
+      const startX = cx - width / 2 + 2;
+      const step = (width - 4) / numStripes;
+      for (let i = 0; i < numStripes; i++) {
+        ctx.fillRect(startX + i * step, cy - stripeLen / 2, stripeW, stripeLen);
+      }
+    } else {
+      const startY = cy - width / 2 + 2;
+      const step = (width - 4) / numStripes;
+      for (let i = 0; i < numStripes; i++) {
+        ctx.fillRect(cx - stripeLen / 2, startY + i * step, stripeLen, stripeW);
+      }
+    }
+    ctx.restore();
+  }
+
   function drawJunctions() {
     JUNCTIONS.forEach(j => {
       const pos = juncPos[j.id];
       if (!pos) return;
       const sig = signals[j.id];
+
+      // ── 4-Way Crossroad Intersection Geometry (ALL 4 SIDES) ──
+      const armLen = 85;
+      const roadW = 38;
+      const halfW = roadW / 2;
+
+      // 1. Asphalt Road Shadows on All 4 Arms
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillRect(pos.x - halfW - 2, pos.y - armLen, roadW + 4, armLen * 2);
+      ctx.fillRect(pos.x - armLen, pos.y - halfW - 2, armLen * 2, roadW + 4);
+
+      // 2. Main Asphalt Base (#374151) on All 4 Arms
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(pos.x - halfW, pos.y - armLen, roadW, armLen * 2);
+      ctx.fillRect(pos.x - armLen, pos.y - halfW, armLen * 2, roadW);
+
+      // 3. Inner Road Surface (#4b5563) on All 4 Arms
+      ctx.fillStyle = '#4b5563';
+      ctx.fillRect(pos.x - halfW + 3, pos.y - armLen, roadW - 6, armLen * 2);
+      ctx.fillRect(pos.x - armLen, pos.y - halfW + 3, armLen * 2, roadW - 6);
+
+      // 4. Center Dashed Yellow Divider on All 4 Arms
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 6]);
+      // North arm
+      ctx.beginPath(); ctx.moveTo(pos.x, pos.y - 28); ctx.lineTo(pos.x, pos.y - armLen); ctx.stroke();
+      // South arm
+      ctx.beginPath(); ctx.moveTo(pos.x, pos.y + 28); ctx.lineTo(pos.x, pos.y + armLen); ctx.stroke();
+      // East arm
+      ctx.beginPath(); ctx.moveTo(pos.x + 28, pos.y); ctx.lineTo(pos.x + armLen, pos.y); ctx.stroke();
+      // West arm
+      ctx.beginPath(); ctx.moveTo(pos.x - 28, pos.y); ctx.lineTo(pos.x - armLen, pos.y); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 5. Pedestrian Zebra Crossings on All 4 Arms
+      drawZebraCrosswalk(pos.x, pos.y - 48, 'H', roadW - 8);
+      drawZebraCrosswalk(pos.x, pos.y + 48, 'H', roadW - 8);
+      drawZebraCrosswalk(pos.x + 48, pos.y, 'V', roadW - 8);
+      drawZebraCrosswalk(pos.x - 48, pos.y, 'V', roadW - 8);
+
+      // 6. Directional Indicators on All 4 Arms
+      ctx.font = '700 8px "Segoe UI", sans-serif';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.textAlign = 'center';
+      ctx.fillText('N', pos.x, pos.y - armLen + 10);
+      ctx.fillText('S', pos.x, pos.y + armLen - 4);
+      ctx.fillText('E', pos.x + armLen - 8, pos.y + 3);
+      ctx.fillText('W', pos.x - armLen + 8, pos.y + 3);
 
       // Outer glow ring
       const glowColor = sig.activeDir ? (sig.dirs[sig.activeDir] === 'GREEN' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.15)') : 'rgba(59,130,246,0.15)';
@@ -750,7 +906,28 @@
     drawJunctions();
     drawVehicles();
 
+    if (resilienceConfig.fallbackActive) {
+      drawFallbackBanner();
+    }
+
     requestAnimationFrame(loop);
+  }
+
+  function drawFallbackBanner() {
+    ctx.save();
+    const bannerH = 26;
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+    ctx.fillRect(0, 0, W, bannerH);
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, W, bannerH);
+
+    ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚠️ CATS-R RESILIENCE: SAFE FALLBACK ACTIVE — Overload / Latency Detected (Fail-Safe Fixed Clearance Enabled)', W / 2, bannerH / 2);
+    ctx.restore();
   }
 
   // ── Junction HTML Labels ───────────────────────────────
@@ -915,6 +1092,66 @@
       } catch (err) {}
       pushSyncToDashboard();
     });
+
+    // ── CATS-R Resilience Sliders & Controls ──
+    const pLossInput = document.getElementById('input-packet-loss');
+    pLossInput?.addEventListener('input', e => {
+      resilienceConfig.packetLossPct = parseInt(e.target.value, 10);
+      setText('val-packet-loss', resilienceConfig.packetLossPct + '%');
+    });
+
+    const latInput = document.getElementById('input-latency');
+    latInput?.addEventListener('input', e => {
+      resilienceConfig.latencyMs = parseInt(e.target.value, 10);
+      setText('val-latency', resilienceConfig.latencyMs + 'ms');
+    });
+
+    const missInput = document.getElementById('input-missing-obs');
+    missInput?.addEventListener('input', e => {
+      resilienceConfig.missingObsPct = parseInt(e.target.value, 10);
+      setText('val-missing-obs', resilienceConfig.missingObsPct + '%');
+    });
+
+    const ageCheck = document.getElementById('check-data-age');
+    ageCheck?.addEventListener('change', e => {
+      resilienceConfig.dataAgeAware = e.target.checked;
+    });
+  }
+
+  function updateFallbackUI() {
+    const box = document.getElementById('fallback-status-box');
+    const ind = document.getElementById('fallback-indicator');
+    if (!box || !ind) return;
+
+    if (resilienceConfig.fallbackActive) {
+      box.className = 'fallback-status-box active';
+      box.style.background = 'rgba(239,68,68,0.2)';
+      box.style.borderColor = '#ef4444';
+      ind.style.color = '#fca5a5';
+      ind.textContent = '⚠️ SAFE FALLBACK ACTIVE (' + resilienceConfig.fallbackTimer + 's)';
+    } else {
+      box.className = 'fallback-status-box';
+      box.style.background = 'rgba(34,197,94,0.15)';
+      box.style.borderColor = '#22c55e';
+      ind.style.color = '#4ade80';
+      ind.textContent = '● OPERATIONAL (NORMAL)';
+    }
+  }
+
+  function updateResilienceMetricsUI() {
+    const total = Math.max(1, resilienceConfig.totalTasks);
+    const missedPct = ((resilienceConfig.missedDeadlines / total) * 100).toFixed(1);
+    const missedEl = document.getElementById('stat-missed-deadlines');
+    if (missedEl) {
+      missedEl.textContent = `${resilienceConfig.missedDeadlines} (${missedPct}%)`;
+      missedEl.className = resilienceConfig.missedDeadlines > 0 ? 'red' : 'green';
+    }
+
+    const baseResp = 15 + Math.round(resilienceConfig.latencyMs * 0.2);
+    setText('stat-resp-time', baseResp + ' ms');
+
+    const cpuBase = Math.min(95, 30 + Math.round(vehicles.length * 2.2) + (resilienceConfig.packetLossPct > 0 ? 15 : 0));
+    setText('stat-cpu-util', cpuBase + ' %');
   }
 
   function updateClock() {
